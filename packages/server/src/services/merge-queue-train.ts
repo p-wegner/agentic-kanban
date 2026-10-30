@@ -28,7 +28,7 @@ import {
   updateMergeTrainState,
 } from "../repositories/merge-train.repository.js";
 import { decideAgeAbandonSplit } from "./merge-train-age-split.js";
-import { runMergeTrain, formatTrainLabel, trainDateStamp, trainRefName, type OnTrainDropped } from "./merge-train.service.js";
+import { runMergeTrain, formatTrainLabel, trainDateStamp, trainRefName, type OnTrainDropped, type TrainRunResult } from "./merge-train.service.js";
 import { isMergeTrainLabelLive, noteMergeTrainGateActivity, withMergeTrainGateActivity, registerLiveMergeTrain, unregisterLiveMergeTrain } from "./merge-train-live-registry.js";
 import { clearCarriedFix, pinCarriedFix, withCarriedFix, type CarryState } from "./merge-train-carry-fix.js";
 import { cleanupTrainWorktreesForLabel, pinTrainRefsForLabel } from "./merge-train-worktrees.js";
@@ -557,6 +557,53 @@ export function createMergeTrainRunner(deps: {
   const reviewTrain = deps.reviewTrain ?? runTrainReview;
   const agentRunner = deps.agentFixRunner ?? createPlacedSessionRunner({ database });
 
+  /** Per-member events for dropped / bisected-out / sided members, once each (#1184, #492, #1194). */
+  function* attributedMemberEvents(result: TrainRunResult, seenEvent: Set<string>): Generator<MergeQueueEvent> {
+    const fresh = (workspaceId: string): boolean => {
+      if (seenEvent.has(workspaceId)) return false;
+      seenEvent.add(workspaceId);
+      return true;
+    };
+    for (const d of result.dropped) {
+      if (fresh(d.member.workspaceId)) yield { type: "skipped", workspaceId: d.member.workspaceId, issueNumber: d.member.issueNumber ?? null, issueTitle: "", reason: `dropped from train: ${d.reason.slice(0, 200)}` };
+    }
+    // #492 — a member the bisect individually proved red is attributed to ITSELF, not blamed on the batch.
+    for (const r of result.gateRejected) {
+      if (fresh(r.member.workspaceId)) yield { type: "error", workspaceId: r.member.workspaceId, issueNumber: r.member.issueNumber ?? null, issueTitle: "", error: `${BRANCH_ALONE_FAILURE_PREFIX} (bisected out of the train): ${r.reason.slice(0, 300)}` };
+    }
+    // #1194 - a sided member did NOT land, but its train did: `skipped`, the author's to fix and re-push.
+    for (const sd of result.sided) {
+      if (fresh(sd.member.workspaceId)) yield { type: "skipped", workspaceId: sd.member.workspaceId, issueNumber: sd.member.issueNumber ?? null, issueTitle: "", reason: `sided by the train review: ${sd.reason.slice(0, 300)}` };
+    }
+  }
+
+  /**
+   * #1679: a train abandoned for gate age must not be re-gated identically. Returns the members to
+   * run (deferred ones skipped), or null after yielding the terminal `done` when the batch escalates.
+   */
+  async function* splitAgeAbandonedMembers<M extends { workspaceId: string; issueNumber?: number | null }>(
+    plan: MergeQueuePlan, members: M[],
+  ): AsyncGenerator<MergeQueueEvent, M[] | null> {
+    const firstIssue = (plan.order.find((ws) => ws.id === members[0].workspaceId) ?? plan.order[0]);
+    const issueRows = await getMergeQueueIssueRows([firstIssue.issueId], database);
+    const pid = issueRows[0]?.projectId;
+    const recent = pid ? await listRecentMergeTrainsForProject(pid, 5, database).catch(() => []) : [];
+    const split = decideAgeAbandonSplit(members.map((m) => m.workspaceId), recent, pid ?? undefined);
+    if (split.action === "escalate") {
+      console.warn(`[merge-train] ${split.reason}`);
+      yield { type: "skipped", workspaceId: firstIssue.id, issueNumber: firstIssue.issueNumber, issueTitle: firstIssue.issueTitle, reason: split.reason };
+      yield { type: "done", merged: [], failed: [], skipped: members.map((m) => m.workspaceId) };
+      return null;
+    }
+    if (split.action !== "split") return members;
+    console.log(`[merge-train] ${split.reason}`);
+    const deferred = new Set(split.deferred);
+    for (const m of members.filter((x) => deferred.has(x.workspaceId))) {
+      yield { type: "skipped", workspaceId: m.workspaceId, issueNumber: m.issueNumber ?? null, issueTitle: "", reason: split.reason };
+    }
+    return members.filter((x) => !deferred.has(x.workspaceId));
+  }
+
   /**
    * Run the whole batch as one release train: assemble → gate ONCE → land → close each member.
    *
@@ -602,27 +649,9 @@ export function createMergeTrainRunner(deps: {
     }
     let members = admitted;
     // #1679: a train abandoned for gate age must not be re-gated identically - split or escalate.
-    {
-      const firstIssue = (plan.order.find((ws) => ws.id === members[0].workspaceId) ?? plan.order[0]);
-      const issueRows = await getMergeQueueIssueRows([firstIssue.issueId], database);
-      const pid = issueRows[0]?.projectId;
-      const recent = pid ? await listRecentMergeTrainsForProject(pid, 5, database).catch(() => []) : [];
-      const split = decideAgeAbandonSplit(members.map((m) => m.workspaceId), recent, pid ?? undefined);
-      if (split.action === "escalate") {
-        console.warn(`[merge-train] ${split.reason}`);
-        yield { type: "skipped", workspaceId: firstIssue.id, issueNumber: firstIssue.issueNumber, issueTitle: firstIssue.issueTitle, reason: split.reason };
-        yield { type: "done", merged: [], failed: [], skipped: members.map((m) => m.workspaceId) };
-        return;
-      }
-      if (split.action === "split") {
-        console.log(`[merge-train] ${split.reason}`);
-        const deferred = new Set(split.deferred);
-        for (const m of members.filter((x) => deferred.has(x.workspaceId))) {
-          yield { type: "skipped", workspaceId: m.workspaceId, issueNumber: m.issueNumber ?? null, issueTitle: "", reason: split.reason };
-        }
-        members = members.filter((x) => !deferred.has(x.workspaceId));
-      }
-    }
+    const kept = yield* splitAgeAbandonedMembers(plan, members);
+    if (!kept) return;
+    members = kept;
     // A member that conflicts with the base is sent back to its builder the moment assembly
     // drops it (`onDropped` inside the train), not after the whole gate and bisect: observed
     // live (#1253/#1261), a drop recorded only at the end never reached the builder when the
@@ -719,27 +748,7 @@ export function createMergeTrainRunner(deps: {
       // `deferred` drops (#1191, member-vs-member) are never sent back.
       await sendBack.onDropped(result.dropped, { trainRef: result.trainRef, tipSha: trainTipSha });
     }
-    for (const d of result.dropped) {
-      if (seenEvent.has(d.member.workspaceId)) continue;
-      seenEvent.add(d.member.workspaceId);
-      yield { type: "skipped", workspaceId: d.member.workspaceId, issueNumber: d.member.issueNumber ?? null, issueTitle: "", reason: `dropped from train: ${d.reason.slice(0, 200)}` };
-    }
-    // #492 — a member the bisect individually proved red is attributed to ITSELF, not blamed
-    // on the batch. This is the difference between "your branch broke the gate" and "someone
-    // in a batch you were in broke the gate", and only the first is actionable by its author.
-    for (const r of result.gateRejected) {
-      if (seenEvent.has(r.member.workspaceId)) continue;
-      seenEvent.add(r.member.workspaceId);
-      yield { type: "error", workspaceId: r.member.workspaceId, issueNumber: r.member.issueNumber ?? null, issueTitle: "", error: `${BRANCH_ALONE_FAILURE_PREFIX} (bisected out of the train): ${r.reason.slice(0, 300)}` };
-    }
-    // #1194 - a member the train review sided did NOT land, but its train did (or would have):
-    // the findings are already on its ticket, and its branch is untouched. `skipped`, like a
-    // conflict drop: this is the author's to fix and re-push, not a batch failure.
-    for (const sd of result.sided) {
-      if (seenEvent.has(sd.member.workspaceId)) continue;
-      seenEvent.add(sd.member.workspaceId);
-      yield { type: "skipped", workspaceId: sd.member.workspaceId, issueNumber: sd.member.issueNumber ?? null, issueTitle: "", reason: `sided by the train review: ${sd.reason.slice(0, 300)}` };
-    }
+    yield* attributedMemberEvents(result, seenEvent);
     if (result.landed.length === 0 && result.inconclusive) {
       yield* inconclusiveSkipEvents(members, seenEvent, result.gateFailure);
       yield { type: "done", merged: [], failed: [], skipped: members.map((m) => m.workspaceId) };

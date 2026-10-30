@@ -36,6 +36,23 @@ async function persistAttempts(records: MergeTrainAttemptDto[], onAttempt?: (att
   }
 }
 
+/** Bookkeeping AFTER the work is safely on the base: close each landed member, reporting (not swallowing) failures. */
+async function closeLandedMembers(
+  included: TrainMember[],
+  closeMember: (workspaceId: string) => Promise<void>,
+  closeFailures: TrainRunResult["closeFailures"],
+): Promise<void> {
+  for (const member of included) {
+    try {
+      await closeMember(member.workspaceId);
+    } catch (err) {
+      const reason = errorMessage(err);
+      closeFailures.push({ member, reason });
+      console.warn(`[merge-train] landed ${member.branch} but could not close its workspace: ${reason.slice(0, 200)}`);
+    }
+  }
+}
+
 /** ONE assemble → gate → land → close cycle. The bisect driver above composes these. */
 export async function runTrainAttempt(args: {
   repoPath: string;
@@ -269,15 +286,7 @@ export async function runTrainAttempt(args: {
       // Bookkeeping AFTER the work is safely on the base. A failure here leaves a member merged
       // but not marked — recoverable by the existing done-unmerged/already-merged reconcilers,
       // and reported rather than swallowed.
-      for (const member of landAsm.included) {
-        try {
-          await closeMember(member.workspaceId);
-        } catch (err) {
-          const reason = errorMessage(err);
-          closeFailures.push({ member, reason });
-          console.warn(`[merge-train] landed ${member.branch} but could not close its workspace: ${reason.slice(0, 200)}`);
-        }
-      }
+      await closeLandedMembers(landAsm.included, closeMember, closeFailures);
       return await finish({ trainRef: landAsm.trainRef, landed: landAsm.included, dropped: [...asm.dropped, ...additionalDropped], mergeSha, closeFailures, gateRejected: [], sided: [], gateRuns: 1 }, "landed");
     }
 
@@ -307,15 +316,7 @@ export async function runTrainAttempt(args: {
       // Bookkeeping AFTER the work is safely on the base. A failure here leaves a member merged
       // but not marked — recoverable by the existing done-unmerged/already-merged reconcilers,
       // and reported rather than swallowed.
-      for (const member of reassembled.included) {
-        try {
-          await closeMember(member.workspaceId);
-        } catch (err) {
-          const reason = errorMessage(err);
-          closeFailures.push({ member, reason });
-          console.warn(`[merge-train] landed ${member.branch} but could not close its workspace: ${reason.slice(0, 200)}`);
-        }
-      }
+      await closeLandedMembers(reassembled.included, closeMember, closeFailures);
 
       return await finish({
         trainRef: asm.trainRef, landed: reassembled.included, dropped: [...asm.dropped, ...reassembled.dropped],

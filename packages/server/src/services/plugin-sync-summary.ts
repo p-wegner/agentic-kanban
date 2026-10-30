@@ -29,18 +29,18 @@ export function parseRunOutput(stdout: string): Rec | undefined {
   }
 }
 
-/** `{ siteUrl }` turns a Jira key into its browse link; absent -> no link. */
-export function parseRunSummary(stdout: string, opts: { siteUrl?: string } = {}): PluginSyncRunSummary | undefined {
-  const rec = parseRunOutput(stdout);
-  if (!rec) return undefined;
-  const site = opts.siteUrl?.trim().replace(/\/+$/, "");
-  const link = (key: string, explicit?: unknown) => str(explicit) ?? (site ? `${site}/browse/${key}` : undefined);
-  const summary: PluginSyncRunSummary = {};
-  const wouldBe = (s: string | undefined) => (rec.dryRun === true && s ? `would ${s}` : s);
-  const step = str(rec.step);
-  if (step) summary.step = step;
+type Counts = NonNullable<PluginSyncRunSummary["counts"]>;
+type SummaryIssue = NonNullable<PluginSyncRunSummary["issues"]>[number];
+type SummaryConflict = NonNullable<PluginSyncRunSummary["conflicts"]>[number];
+type LinkFn = (key: string, explicit?: unknown) => string | undefined;
 
-  const counts: NonNullable<PluginSyncRunSummary["counts"]> = isRec(rec.counts) ? { ...rec.counts } : {};
+/** A dry run wrote nothing, so its writes are planned, never applied/created/updated/deleted (#1638). */
+const DRY_RUN_RENAMES: Array<[keyof Counts, keyof Counts]> = [
+  ["created", "wouldCreate"], ["updated", "wouldUpdate"], ["deleted", "wouldDelete"], ["applied", "planned"],
+];
+
+function buildCounts(rec: Rec): Counts {
+  const counts: Counts = isRec(rec.counts) ? { ...rec.counts } : {};
   for (const k of ["created", "updated", "skipped", "conflicted"] as const) {
     const n = num(rec[k]);
     if (n !== undefined) counts[k] = n;
@@ -51,61 +51,96 @@ export function parseRunSummary(stdout: string, opts: { siteUrl?: string } = {})
   if (applied !== undefined) counts.applied = applied;
   if (failed !== undefined) counts.failed = failed;
   if (Array.isArray(rec.reportedOutOfScope)) counts.outOfScope = rec.reportedOutOfScope.length;
-  // A dry run wrote nothing, so its writes are planned, never applied/created/updated/deleted (#1638).
-  if (rec.dryRun === true) {
-    const rename: Array<[keyof typeof counts, keyof typeof counts]> = [
-      ["created", "wouldCreate"], ["updated", "wouldUpdate"], ["deleted", "wouldDelete"], ["applied", "planned"],
-    ];
-    for (const [from, to] of rename) {
-      if (counts[from] !== undefined) {
-        counts[to] = counts[from];
-        delete counts[from];
-      }
-    }
+  if (rec.dryRun !== true) return counts;
+  for (const [from, to] of DRY_RUN_RENAMES) {
+    if (counts[from] === undefined) continue;
+    counts[to] = counts[from];
+    delete counts[from];
   }
-  if (Object.keys(counts).length) summary.counts = counts;
-  const note = str(rec.droppedNote);
-  if (note) summary.notes = [note];
+  return counts;
+}
 
-  const issues: NonNullable<PluginSyncRunSummary["issues"]> = [];
-  const conflicts: NonNullable<PluginSyncRunSummary["conflicts"]> = [];
+const strList = (v: unknown): string[] => (Array.isArray(v) ? v.filter((c): c is string => typeof c === "string") : []);
+
+/** The status text of a non-conflict `details` row: action, what changed / why, link notes, drift. */
+function detailStatus(d: Rec): string {
+  // #1709: board-to-jira drift is not a plain skip: say which fields Jira differs on.
+  const drift = isRec(d.jiraDiffers) ? Object.keys(d.jiraDiffers) : [];
+  const driftNote = drift.length ? `: Jira differs on ${drift.join(", ")}; the next push restores the board value` : "";
+  // #1720: carry the plugin's own words (what changed / why it was refused) into the status.
+  const what = (Array.isArray(d.changes) ? strList(d.changes).join("; ") : str(d.changes)) || str(d.reason);
+  const linkNotes = strList(d.linkNotes);
+  const text = what || linkNotes.length ? `: ${[what, ...linkNotes].filter(Boolean).join("; ")}` : "";
+  return `${str(d.action) ?? ""}${text}${driftNote}`;
+}
+
+function collectDetails(
+  rec: Rec, link: LinkFn, wouldBe: (s: string | undefined) => string | undefined,
+  issues: SummaryIssue[], conflicts: SummaryConflict[],
+): void {
   for (const d of recs(rec.details)) {
     const key = str(d.key);
     if (!key) continue;
-    if (d.action === "conflict") conflicts.push({ externalKey: key, reason: str(d.reason) ?? "", externalUrl: link(key), localIssueNumber: num(d.localIssueNumber) });
-    else {
-      // #1709: board-to-jira drift is not a plain skip: say which fields Jira differs on.
-      const drift = isRec(d.jiraDiffers) ? Object.keys(d.jiraDiffers) : [];
-      const note = drift.length ? `: Jira differs on ${drift.join(", ")}; the next push restores the board value` : "";
-      // #1720: carry the plugin's own words (what changed / why it was refused) into the status.
-      const what = (Array.isArray(d.changes) ? d.changes.filter((c): c is string => typeof c === "string").join("; ") : str(d.changes)) || str(d.reason);
-      const linkNotes = Array.isArray(d.linkNotes) ? d.linkNotes.filter((c): c is string => typeof c === "string") : [];
-      const text = what || linkNotes.length ? `: ${[what, ...linkNotes].filter(Boolean).join("; ")}` : "";
-      issues.push({ externalKey: key, status: wouldBe(`${str(d.action) ?? ""}${text}${note}` || undefined), externalUrl: link(key), localIssueNumber: num(d.localIssueNumber) });
+    const localIssueNumber = num(d.localIssueNumber);
+    if (d.action === "conflict") {
+      conflicts.push({ externalKey: key, reason: str(d.reason) ?? "", externalUrl: link(key), localIssueNumber });
+      continue;
     }
+    issues.push({ externalKey: key, status: wouldBe(detailStatus(d) || undefined), externalUrl: link(key), localIssueNumber });
   }
+}
+
+function collectApplied(
+  rec: Rec, link: LinkFn, wouldBe: (s: string | undefined) => string | undefined, issues: SummaryIssue[],
+): void {
   for (const a of recs(rec.applied)) {
     const key = str(a.key);
     if (key) issues.push({ externalKey: key, status: wouldBe(str(a.change) ?? str(a.kind) ?? "applied"), externalUrl: link(key), localIssueNumber: num(a.localIssueNumber) });
   }
+}
+
+function collectGeneric(rec: Rec, link: LinkFn, issues: SummaryIssue[], conflicts: SummaryConflict[]): void {
   for (const i of recs(rec.issues)) {
     const key = str(i.externalKey);
-    if (key) {
-      issues.push({ externalKey: key, externalUrl: link(key, i.externalUrl), localIssueNumber: num(i.localIssueNumber), status: str(i.status) });
-    }
+    if (key) issues.push({ externalKey: key, externalUrl: link(key, i.externalUrl), localIssueNumber: num(i.localIssueNumber), status: str(i.status) });
   }
   for (const c of recs(rec.conflicts)) {
     const key = str(c.externalKey);
     if (key) conflicts.push({ externalKey: key, reason: String(c.reason ?? ""), externalUrl: link(key, c.externalUrl), localIssueNumber: num(c.localIssueNumber) });
   }
-  // A generic `{issues: []}` is a statement ("none"), so keep the empty array when the script sent one.
-  if (issues.length || Array.isArray(rec.issues)) summary.issues = issues;
-  if (conflicts.length || Array.isArray(rec.conflicts)) summary.conflicts = conflicts;
+}
 
-  const failures = recs(rec.failed)
+function collectFailures(rec: Rec, link: LinkFn): NonNullable<PluginSyncRunSummary["failures"]> {
+  return recs(rec.failed)
     .map((f) => ({ externalKey: str(f.key) ?? "", reason: str(f.reason) ?? "", kind: str(f.kind), localIssueNumber: num(f.localIssueNumber) }))
     .filter((f) => f.externalKey || f.reason)
     .map((f) => ({ ...f, externalUrl: f.externalKey ? link(f.externalKey) : undefined }));
+}
+
+/** `{ siteUrl }` turns a Jira key into its browse link; absent -> no link. */
+export function parseRunSummary(stdout: string, opts: { siteUrl?: string } = {}): PluginSyncRunSummary | undefined {
+  const rec = parseRunOutput(stdout);
+  if (!rec) return undefined;
+  const site = opts.siteUrl?.trim().replace(/\/+$/, "");
+  const link: LinkFn = (key, explicit) => str(explicit) ?? (site ? `${site}/browse/${key}` : undefined);
+  const wouldBe = (s: string | undefined) => (rec.dryRun === true && s ? `would ${s}` : s);
+  const summary: PluginSyncRunSummary = {};
+  const step = str(rec.step);
+  if (step) summary.step = step;
+  const counts = buildCounts(rec);
+  if (Object.keys(counts).length) summary.counts = counts;
+  const note = str(rec.droppedNote);
+  if (note) summary.notes = [note];
+
+  const issues: SummaryIssue[] = [];
+  const conflicts: SummaryConflict[] = [];
+  collectDetails(rec, link, wouldBe, issues, conflicts);
+  collectApplied(rec, link, wouldBe, issues);
+  collectGeneric(rec, link, issues, conflicts);
+  // A generic `{issues: []}` is a statement ("none"), so keep the empty array when the script sent one.
+  if (issues.length || Array.isArray(rec.issues)) summary.issues = issues;
+  if (conflicts.length || Array.isArray(rec.conflicts)) summary.conflicts = conflicts;
+  const failures = collectFailures(rec, link);
   if (failures.length) summary.failures = failures;
   return summary;
 }

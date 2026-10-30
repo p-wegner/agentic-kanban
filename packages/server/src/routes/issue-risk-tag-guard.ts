@@ -16,6 +16,60 @@ import { insertIssueComment } from "../repositories/issue-comments.repository.js
 import { parseJsonBody } from "../middleware/parse-body.js";
 import { riskTagGuardPeekBody } from "./issue-body-schemas.js";
 
+type Peek = { projectId?: unknown; tagId?: unknown; tags?: unknown; issues?: unknown } | null | undefined;
+type Route = { tagMatch: RegExpExecArray | null; isCreate: boolean; isBatch: boolean };
+
+function matchRoute(path: string): Route | null {
+  const tagMatch = /\/issues\/([^/]+)\/tags$/.exec(path);
+  const isCreate = /\/issues$/.test(path);
+  const isBatch = /\/issues\/batch$/.test(path);
+  return tagMatch || isCreate || isBatch ? { tagMatch, isCreate, isBatch } : null;
+}
+
+const trimmedStrings = (v: unknown): string[] =>
+  (Array.isArray(v) ? v : []).filter((t): t is string => typeof t === "string").map((t) => t.trim());
+
+const batchItems = (body: Peek): { tags?: unknown }[] => (Array.isArray(body?.issues) ? body.issues as { tags?: unknown }[] : []);
+
+/** The tag names the request would attach, plus the project they would land in (when knowable up front). */
+async function peekTagNames(route: Route, body: Peek, database: Database): Promise<{ names: string[]; projectId: string | null }> {
+  const bodyProject = typeof body?.projectId === "string" ? body.projectId : null;
+  if (route.tagMatch) {
+    const issueId = route.tagMatch[1];
+    const tag = typeof body?.tagId === "string" ? await getTagById(body.tagId, database) : null;
+    return { names: tag ? [tag.name] : [], projectId: (await getIssueProjectId(issueId, database)) ?? null };
+  }
+  if (route.isBatch) return { names: batchItems(body).flatMap((i) => trimmedStrings(i?.tags)), projectId: bodyProject };
+  return { names: trimmedStrings(body?.tags), projectId: bodyProject };
+}
+
+function routeSource(route: Route, operator: boolean): string {
+  const label = route.tagMatch ? "POST /api/issues/:id/tags" : route.isBatch ? "POST /api/issues/batch" : "POST /api/issues";
+  return `REST ${label} (${operator ? "operator" : "agent"})`;
+}
+
+async function recordRiskTag(database: Database, issueId: string, name: string, operator: boolean, source: string): Promise<void> {
+  const level = riskTagLevel(name);
+  if (!level) return;
+  await insertIssueComment({
+    issueId,
+    kind: "note",
+    author: operator ? "user" : "agent",
+    body: describeRiskTagApplied(level, source),
+    payload: { riskTag: name, source },
+  }, database).catch(() => {});
+}
+
+async function recordBatch(res: Response, body: Peek, record: (id: string, name: string) => Promise<void>): Promise<void> {
+  const created = await res.clone().json().then((r) => (r as { issues?: { id?: string }[] }).issues ?? []).catch(() => []);
+  const items = batchItems(body);
+  for (let i = 0; i < created.length; i++) {
+    const id = created[i]?.id;
+    if (!id) continue;
+    for (const t of trimmedStrings(items[i]?.tags)) await record(id, t);
+  }
+}
+
 /**
  * #1745 — REST guard for the two paths that can attach a `risk:<level>` tag to an issue
  * (`POST /api/issues` with `tags`, `POST /api/issues/:id/tags`).
@@ -28,28 +82,13 @@ import { riskTagGuardPeekBody } from "./issue-body-schemas.js";
 export function createRiskTagGuard(database: Database): MiddlewareHandler {
   return async (c, next) => {
     if (c.req.method !== "POST") return next();
-    const path = new URL(c.req.url).pathname.replace(/\/+$/, "");
-    const tagMatch = /\/issues\/([^/]+)\/tags$/.exec(path);
-    const isCreate = /\/issues$/.test(path);
-    const isBatch = /\/issues\/batch$/.test(path);
-    if (!tagMatch && !isCreate && !isBatch) return next();
+    const route = matchRoute(new URL(c.req.url).pathname.replace(/\/+$/, ""));
+    if (!route) return next();
 
     // The three handlers behind this guard all `parseJsonBody` the same body, so invalid JSON
     // gets the same 400 here as it would there; the schema deliberately checks nothing else.
     const body = await parseJsonBody(c, riskTagGuardPeekBody);
-    let issueId: string | null = tagMatch?.[1] ?? null;
-    let projectId: string | null = typeof body?.projectId === "string" ? body.projectId : null;
-    let names: string[] = [];
-    if (tagMatch) {
-      const tag = typeof body?.tagId === "string" ? await getTagById(body.tagId, database) : null;
-      names = tag ? [tag.name] : [];
-      projectId = issueId ? await getIssueProjectId(issueId, database) ?? null : null;
-    } else if (isBatch) {
-      const items = Array.isArray(body?.issues) ? body.issues as { tags?: unknown }[] : [];
-      names = items.flatMap((i) => (Array.isArray(i?.tags) ? i.tags : [])).filter((t): t is string => typeof t === "string").map((t) => t.trim());
-    } else if (Array.isArray(body?.tags)) {
-      names = body.tags.filter((t): t is string => typeof t === "string").map((t) => t.trim());
-    }
+    const { names, projectId } = await peekTagNames(route, body, database);
     const riskNames = names.filter((n) => riskTagLevel(n));
     if (riskNames.length === 0) return next();
 
@@ -63,42 +102,12 @@ export function createRiskTagGuard(database: Database): MiddlewareHandler {
     await next();
 
     if (c.res.status >= 400) return;
-    const source = `REST ${tagMatch ? "POST /api/issues/:id/tags" : isBatch ? "POST /api/issues/batch" : "POST /api/issues"} (${operator ? "operator" : "agent"})`;
-    const record = async (id: string, name: string) => {
-      const level = riskTagLevel(name);
-      if (!level) return;
-      await insertIssueComment({
-        issueId: id,
-        kind: "note",
-        author: operator ? "user" : "agent",
-        body: describeRiskTagApplied(level, source),
-        payload: { riskTag: name, source },
-      }, database).catch(() => {});
-    };
-    if (isBatch) {
-      const created = await c.res.clone().json().then((r) => (r as { issues?: { id?: string }[] }).issues ?? []).catch(() => []);
-      const items = Array.isArray(body?.issues) ? body.issues as { tags?: unknown }[] : [];
-      for (let i = 0; i < created.length; i++) {
-        const id = created[i]?.id;
-        const tags = Array.isArray(items[i]?.tags) ? (items[i].tags as unknown[]) : [];
-        if (id) for (const t of tags) if (typeof t === "string") await record(id, t.trim());
-      }
-      return;
-    }
-    if (!issueId) {
-      issueId = await c.res.clone().json().then((r) => (r as { id?: string }).id ?? null).catch(() => null);
-    }
+    const source = routeSource(route, operator);
+    const record = (id: string, name: string) => recordRiskTag(database, id, name, operator, source);
+    if (route.isBatch) return recordBatch(c.res, body, record);
+    const issueId = route.tagMatch?.[1]
+      ?? await c.res.clone().json().then((r) => (r as { id?: string }).id ?? null).catch(() => null);
     if (!issueId) return;
-    for (const name of riskNames) {
-      const level = riskTagLevel(name);
-      if (!level) continue;
-      await insertIssueComment({
-        issueId,
-        kind: "note",
-        author: operator ? "user" : "agent",
-        body: describeRiskTagApplied(level, source),
-        payload: { riskTag: name, source },
-      }, database).catch(() => {});
-    }
+    for (const name of riskNames) await record(issueId, name);
   };
 }

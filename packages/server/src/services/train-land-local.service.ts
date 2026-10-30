@@ -171,10 +171,6 @@ export function contentionRerunSuites(log: string, failedSuites: readonly string
   return decision.retry ? decision.suites : null;
 }
 
-function windowLabel(now: string): string {
-  return `local-${now.slice(0, 16).replace(/[-:T]/g, "")}`;
-}
-
 /** Leftover `land-local/*` worktrees of the repo, from `git worktree list --porcelain`. */
 async function listLandLocalWorktrees(deps: LandLocalDeps, repo: string): Promise<Array<{ path: string; label: string; branch: string | null }>> {
   const listed = await deps.git(["worktree", "list", "--porcelain"], repo);
@@ -215,70 +211,16 @@ export async function landTrainLocal(input: LandLocalInput, deps: LandLocalDeps)
   const base = project.defaultBranch;
 
   // Resolve the target before touching any state, so a typo pauses nothing.
-  let train: LandLocalTrainRow | null = null;
-  let memberIds: string[];
-  let label: string;
-  if (input.trainId) {
-    train = await deps.getTrain(input.trainId);
-    if (!train) return { status: "error", message: `train ${input.trainId} not found` };
-    if (train.projectId !== projectId) return { status: "error", message: `train ${train.id} belongs to another project` };
-    if (train.state === "landed") return { status: "error", message: `train ${train.id} already landed` };
-    const excluded = excludedFromEvidence(train.gateEvidence);
-    const excludedIds = new Set(excluded.map((e) => e.workspaceId));
-    for (const e of excluded) {
-      if (train.memberWorkspaceIds.includes(e.workspaceId)) deps.log(`skipping member ${e.workspaceId}: ${e.reason}`);
-    }
-    memberIds = train.memberWorkspaceIds.filter((id) => !excludedIds.has(id));
-    label = train.label;
-  } else if (input.fromWindow) {
-    memberIds = await deps.getWindowMemberIds(projectId);
-    if (memberIds.length === 0) return { status: "error", message: "no open merge-train window with pending members" };
-    if (input.label) {
-      label = input.label.replace(/^train\//, "");
-    } else {
-      // The label is minute-stamped, so a later call cannot re-derive it: find the red run's worktree instead.
-      const all = await listLandLocalWorktrees(deps, repo);
-      const leftovers = windowLeftovers(all);
-      if (input.continueRun) {
-        if (leftovers.length === 1) {
-          label = leftovers[0].label;
-          deps.log(`--continue: resuming window worktree ${leftovers[0].path}`);
-        } else {
-          const existing = (leftovers.length ? leftovers : all).map((w) => w.path);
-          return {
-            status: "error",
-            message: leftovers.length > 1
-              ? `--continue: ${leftovers.length} window worktrees exist - pick one with --label <label>:\n  ${leftovers.map((w) => `${w.label}  ${w.path}`).join("\n  ")}`
-              : `--continue: no window worktree found${existing.length ? `; land-local worktrees that exist:\n  ${existing.join("\n  ")}` : " (no land-local worktrees exist)"}`,
-          };
-        }
-      } else {
-        if (leftovers.length) {
-          return {
-            status: "error",
-            message: `window worktree(s) already exist from an earlier run - fix and re-run with --continue --label <label>, or remove:\n  ${leftovers.map((w) => `${w.label}  ${w.path}`).join("\n  ")}`,
-            worktree: leftovers[0].path,
-          };
-        }
-        label = windowLabel(deps.nowIso());
-      }
-    }
-  } else {
-    return { status: "error", message: "give a train id or --from-window" };
-  }
+  const target = await resolveTarget(deps, input, repo);
+  if ("status" in target) return target;
+  const { train, memberIds, label } = target;
   const members = filterByIssueFlags(await deps.loadMembers(memberIds), input, deps.log);
   if (members.length === 0) return { status: "error", message: "the train has no loadable members" };
 
   const worktree = landLocalWorktreePath(repo, label);
   const branch = landLocalBranchName(label);
-  const worktreeExists = deps.pathExists(worktree);
-  if (input.continueRun && !worktreeExists) {
-    const others = (await listLandLocalWorktrees(deps, repo)).map((w) => w.path);
-    return { status: "error", message: `--continue: no worktree at ${worktree}${others.length ? `; land-local worktrees that exist:\n  ${others.join("\n  ")}` : ""}` };
-  }
-  if (!input.continueRun && worktreeExists) {
-    return { status: "error", message: `worktree ${worktree} already exists from an earlier run - fix it and re-run with --continue (or --continue --on-worker to move the re-run to a verify worker; a fresh --on-worker run refuses on the leftover worktree)`, worktree };
-  }
+  const worktreeError = await checkWorktreeState(deps, input, repo, worktree);
+  if (worktreeError) return worktreeError;
 
   // 1. Pause auto-merge + hold the window. Restored in `finally`, red or thrown.
   const autoMergeKey = `auto_merge_disabled_${projectId}`;
@@ -311,31 +253,8 @@ export async function landTrainLocal(input: LandLocalInput, deps: LandLocalDeps)
       else if (red) return red;
     }
     if (onHost) {
-      const cap = await deps.hostMaxWorkers?.();
-      const hostEnv: Record<string, string> = cap ? { KANBAN_TEST_MAX_WORKERS: String(cap), VITEST_MAX_WORKERS: String(cap), VITEST_TEST_TIMEOUT: "240000" } : { VITEST_TEST_TIMEOUT: "240000" };
-      if (cap) deps.log(`gating on this host with vitest capped to ${cap} worker(s)`);
-      const installOutcome = input.skipInstall || input.continueRun ? null : await step(deps, "install", "pnpm install -r", worktree, {});
-      if (installOutcome && installOutcome.code !== 0) {
-        return { status: "red", step: "install", failedSuites: [], worktree, tail: installOutcome.tail };
-      }
-      for (const gate of gateSteps) {
-        const result = await step(deps, gate.name, gate.command, worktree, { ...hostEnv, KANBAN_TEST_FILES: changed.join(",") });
-        if (result.code !== 0 && gate.name === "test:mine") {
-          const rerun = contentionRerunSuites(result.tail, parseFailedSuites(result.tail));
-          if (rerun) {
-            deps.log(`gate failed on ${rerun.length} suite(s); re-running only those on one vitest worker to tell contention from a regression (#1713)`);
-            const second = await step(deps, `${gate.name} (contention re-run)`, gate.command, worktree, { ...hostEnv, ...CONTENTION_RETRY_ENV, KANBAN_TEST_FILES: changed.join(","), KANBAN_RETRY_TEST_FILES: retryScopeEnvValue(rerun) });
-            if (second.code === 0) {
-              deps.log(`gate GREEN on the targeted re-run (${CONTENTION_NOTE})`);
-              continue;
-            }
-          }
-        }
-        if (result.code !== 0) {
-          deps.log(`gate RED at ${gate.name}; worktree left at ${worktree} - commit a fix there, then re-run with --continue`);
-          return { status: "red", step: gate.name, failedSuites: parseFailedSuites(result.tail), worktree, tail: result.tail };
-        }
-      }
+      const red = await gateOnHost({ deps, input, worktree, changed, gateSteps });
+      if (red) return red;
     }
 
     // 4. Land on the base in the main checkout, with the standard subject.
@@ -345,6 +264,105 @@ export async function landTrainLocal(input: LandLocalInput, deps: LandLocalDeps)
   } finally {
     await restore(deps, projectId, autoMergeKey, priorAutoMerge);
   }
+}
+
+type ResolvedTarget = { train: LandLocalTrainRow | null; memberIds: string[]; label: string };
+
+/** Target from a persisted train row. */
+async function resolveTrainTarget(deps: LandLocalDeps, projectId: string, trainId: string): Promise<ResolvedTarget | LandLocalOutcome> {
+  const train = await deps.getTrain(trainId);
+  if (!train) return { status: "error", message: `train ${trainId} not found` };
+  if (train.projectId !== projectId) return { status: "error", message: `train ${train.id} belongs to another project` };
+  if (train.state === "landed") return { status: "error", message: `train ${train.id} already landed` };
+  const excluded = excludedFromEvidence(train.gateEvidence);
+  const excludedIds = new Set(excluded.map((e) => e.workspaceId));
+  for (const e of excluded) {
+    if (train.memberWorkspaceIds.includes(e.workspaceId)) deps.log(`skipping member ${e.workspaceId}: ${e.reason}`);
+  }
+  return { train, memberIds: train.memberWorkspaceIds.filter((id) => !excludedIds.has(id)), label: train.label };
+}
+
+/** The label of a window run: explicit, resumed from the one leftover worktree (--continue), or freshly minted. */
+async function resolveWindowLabel(deps: LandLocalDeps, input: LandLocalInput, repo: string): Promise<string | LandLocalOutcome> {
+  if (input.label) return input.label.replace(/^train\//, "");
+  // The label is minute-stamped, so a later call cannot re-derive it: find the red run's worktree instead.
+  const all = await listLandLocalWorktrees(deps, repo);
+  const leftovers = windowLeftovers(all);
+  if (!input.continueRun) {
+    if (!leftovers.length) return `local-${deps.nowIso().slice(0, 16).replace(/[-:T]/g, "")}`;
+    return {
+      status: "error",
+      message: `window worktree(s) already exist from an earlier run - fix and re-run with --continue --label <label>, or remove:\n  ${leftovers.map((w) => `${w.label}  ${w.path}`).join("\n  ")}`,
+      worktree: leftovers[0].path,
+    };
+  }
+  if (leftovers.length === 1) {
+    deps.log(`--continue: resuming window worktree ${leftovers[0].path}`);
+    return leftovers[0].label;
+  }
+  const existing = (leftovers.length ? leftovers : all).map((w) => w.path);
+  return {
+    status: "error",
+    message: leftovers.length > 1
+      ? `--continue: ${leftovers.length} window worktrees exist - pick one with --label <label>:\n  ${leftovers.map((w) => `${w.label}  ${w.path}`).join("\n  ")}`
+      : `--continue: no window worktree found${existing.length ? `; land-local worktrees that exist:\n  ${existing.join("\n  ")}` : " (no land-local worktrees exist)"}`,
+  };
+}
+
+async function resolveTarget(deps: LandLocalDeps, input: LandLocalInput, repo: string): Promise<ResolvedTarget | LandLocalOutcome> {
+  if (input.trainId) return resolveTrainTarget(deps, input.projectId, input.trainId);
+  if (!input.fromWindow) return { status: "error", message: "give a train id or --from-window" };
+  const memberIds = await deps.getWindowMemberIds(input.projectId);
+  if (memberIds.length === 0) return { status: "error", message: "no open merge-train window with pending members" };
+  const label = await resolveWindowLabel(deps, input, repo);
+  if (typeof label !== "string") return label;
+  return { train: null, memberIds, label };
+}
+
+/** --continue needs the worktree; a fresh run refuses on a leftover one. Null = fine. */
+async function checkWorktreeState(deps: LandLocalDeps, input: LandLocalInput, repo: string, worktree: string): Promise<LandLocalOutcome | null> {
+  const worktreeExists = deps.pathExists(worktree);
+  if (input.continueRun && !worktreeExists) {
+    const others = (await listLandLocalWorktrees(deps, repo)).map((w) => w.path);
+    return { status: "error", message: `--continue: no worktree at ${worktree}${others.length ? `; land-local worktrees that exist:\n  ${others.join("\n  ")}` : ""}` };
+  }
+  if (!input.continueRun && worktreeExists) {
+    return { status: "error", message: `worktree ${worktree} already exists from an earlier run - fix it and re-run with --continue (or --continue --on-worker to move the re-run to a verify worker; a fresh --on-worker run refuses on the leftover worktree)`, worktree };
+  }
+  return null;
+}
+
+/** Install + gate steps on this host. Null = green; otherwise the red outcome. */
+async function gateOnHost(a: {
+  deps: LandLocalDeps; input: LandLocalInput; worktree: string; changed: string[]; gateSteps: ReadonlyArray<{ name: string; command: string }>;
+}): Promise<LandLocalOutcome | null> {
+  const { deps, input, worktree, changed, gateSteps } = a;
+  const cap = await deps.hostMaxWorkers?.();
+  const hostEnv: Record<string, string> = cap ? { KANBAN_TEST_MAX_WORKERS: String(cap), VITEST_MAX_WORKERS: String(cap), VITEST_TEST_TIMEOUT: "240000" } : { VITEST_TEST_TIMEOUT: "240000" };
+  if (cap) deps.log(`gating on this host with vitest capped to ${cap} worker(s)`);
+  const installOutcome = input.skipInstall || input.continueRun ? null : await step(deps, "install", "pnpm install -r", worktree, {});
+  if (installOutcome && installOutcome.code !== 0) {
+    return { status: "red", step: "install", failedSuites: [], worktree, tail: installOutcome.tail };
+  }
+  for (const gate of gateSteps) {
+    const result = await step(deps, gate.name, gate.command, worktree, { ...hostEnv, KANBAN_TEST_FILES: changed.join(",") });
+    if (result.code === 0) continue;
+    if (gate.name === "test:mine" && (await contentionRerunPasses(deps, gate, result.tail, worktree, hostEnv, changed))) continue;
+    deps.log(`gate RED at ${gate.name}; worktree left at ${worktree} - commit a fix there, then re-run with --continue`);
+    return { status: "red", step: gate.name, failedSuites: parseFailedSuites(result.tail), worktree, tail: result.tail };
+  }
+  return null;
+}
+
+/** #1713: a red that is only machine load earns one targeted single-worker re-run. True = that re-run was green. */
+async function contentionRerunPasses(deps: LandLocalDeps, gate: { name: string; command: string }, tail: string, worktree: string, hostEnv: Record<string, string>, changed: string[]): Promise<boolean> {
+  const rerun = contentionRerunSuites(tail, parseFailedSuites(tail));
+  if (!rerun) return false;
+  deps.log(`gate failed on ${rerun.length} suite(s); re-running only those on one vitest worker to tell contention from a regression (#1713)`);
+  const second = await step(deps, `${gate.name} (contention re-run)`, gate.command, worktree, { ...hostEnv, ...CONTENTION_RETRY_ENV, KANBAN_TEST_FILES: changed.join(","), KANBAN_RETRY_TEST_FILES: retryScopeEnvValue(rerun) });
+  if (second.code !== 0) return false;
+  deps.log(`gate GREEN on the targeted re-run (${CONTENTION_NOTE})`);
+  return true;
 }
 
 /** Null = green on the worker; "fallback" = auto placement found no worker; otherwise the outcome to return. The worker installs (its setup script, plus an explicit install step unless skipped). */

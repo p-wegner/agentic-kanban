@@ -539,6 +539,192 @@ async function refuseIfBaseIsStale(args: {
   throwWithheldPreMergeGate({ stage: "none" }, staleRefusal);
 }
 
+type PreGate = Awaited<ReturnType<typeof runGateWithEvidence>>;
+
+/** #1671: the rebase dropped every commit and no sibling merge is pending, so there is nothing to gate. */
+async function isEmptyAfterRebase(workingDir: string, baseBranch: string, workspaceId: string, database: Database): Promise<boolean> {
+  // rev-list must answer "0": countUniqueCommits reads a git error as 0, which would skip the gate on any failure.
+  return Promise.resolve().then(async () => {
+    const ahead = await gitExec(["rev-list", "--count", `${baseBranch}..HEAD`], { cwd: workingDir });
+    return execSucceeded(ahead) && ahead.stdout.trim() === "0"
+      && (await listPendingSiblingMerges(realGitService, database, workspaceId)).length === 0;
+  }).catch(() => false);
+}
+
+/**
+ * #491 — before blaming this branch, check whether the base was ALREADY red at the branch's
+ * merge-base. Best-effort: a failure here must never mask the real gate failure, it can only
+ * ADD attribution to it.
+ */
+async function attributeGateFailureToBase(args: {
+  projectId: string; workingDir: string; baseBranch: string; preGateMessage: string; database: Database;
+}): Promise<{ gateMessage: string; failedSuites: string[] | null; baseHealthRecordedSha: string | null }> {
+  const { projectId, workingDir, baseBranch, database } = args;
+  let gateMessage = args.preGateMessage;
+  let failedSuites: string[] | null = null;
+  let baseHealthRecordedSha: string | null = null;
+  try {
+    const baseHealth = await getBaseBranchHealthAtMergeBase(projectId, workingDir, "HEAD", baseBranch, database);
+    baseHealthRecordedSha = baseHealth.recordedSha ?? null;
+    const attribution = describeRedBaseAttribution(baseHealth);
+    if (attribution) gateMessage = `${attribution}\n\n${args.preGateMessage}`;
+
+    // #935 — a NON-ANSWER record (`timeout`/`unverified`) is a probe that could not speak,
+    // and it is sticky: the periodic sweep backs a timeout off by a full
+    // PROBE_MAX_DURATION_MS on top of its interval, so an hour-plus of gates can run
+    // against a verdict nobody measured. A gate failing here is the moment we most want
+    // the base's real state, so ask for a fresh probe rather than waiting the sweep out.
+    //
+    // Routed through `requestBaseBranchReprobe`, NOT `verifyBaseBranchHealth` directly:
+    // the probe is a clone + install + full verify, and the two guards that keep it from
+    // becoming the saturation it measures — the #931 `gateBusy` yield and the #712
+    // `timeout` back-off — live in that due-check, not in the probe. Calling the probe
+    // straight from here would re-spawn a 45-minute verify on EVERY failing gate for as
+    // long as the non-answer row stands, which is precisely this ticket's failure mode.
+    // The in-flight map only dedups overlapping probes; it does not decide whether one
+    // should start.
+    //
+    // Fire-and-forget: it must never delay or fail this gate — the withhold below stands
+    // either way, and the fresh verdict (if it runs) lands for the NEXT gate.
+    if (baseHealth.health && (baseHealth.stale || !isBaseHealthAnswer(baseHealth.health.outcome))) {
+      console.log(
+        `[workspace-merge] base health for project ${projectId} is a non-answer `
+          + `('${baseHealth.health.outcome}') — requesting a fresh probe if due (#935)`,
+      );
+      // Kept as a dynamic import: `base-branch-health-reprobe.service.ts` is now a sibling
+      // service (#947 moved it out of `startup/`, so the layering reason is gone), but this
+      // module is on the merge gate's hot path and the reprobe door is reached only on a
+      // non-answer base row. Deferring the load keeps that cost off every gate.
+      void import("./base-branch-health-reprobe.service.js")
+        .then((m) => m.requestBaseBranchReprobe(projectId, database))
+        .catch(() => {});
+    }
+    if (baseHealth.health?.failedSuites) {
+      try {
+        failedSuites = JSON.parse(baseHealth.health.failedSuites) as string[];
+      } catch {
+        failedSuites = null;
+      }
+    }
+  } catch (err) {
+    console.warn(
+      "[workspace-merge] failed to resolve base-branch health attribution (non-fatal):",
+      err instanceof Error ? err.message : String(err),
+    );
+  }
+  return { gateMessage, failedSuites, baseHealthRecordedSha };
+}
+
+/**
+ * #915 — the red-debt subset rule. A known-red suite must no longer block a `fast`/`sprint`
+ * train; a NEW red suite still does. Returns the softened pass token, or null when the gate
+ * stays withheld (also on any error: non-fatal).
+ */
+async function softenByRedDebtSubsetRule(args: {
+  workspaceId: string; projectId: string; preGate: PreGate; failedSuites: string[]; baseHealthRecordedSha: string | null; database: Database;
+}): Promise<MergeGateToken | null> {
+  const { workspaceId, projectId, preGate, failedSuites, baseHealthRecordedSha, database } = args;
+
+  try {
+    // #1015 — the rule keys on `posture.redBasePolicy`, NOT on the posture LEVEL. The two
+    // agreed exactly while the policy was derived from the level alone, but a project may
+    // now reach a soft policy without a soft level via the softer-only per-project
+    // red-base-policy project override (decision 017, Amendment 2026-09-04) — which is what
+    // lets the dev board "land, then heal" on posture `iterate` instead of having to adopt
+    // `fast`'s gate tier, review mode and train sizing to get there.
+    const [postureRaw, redBasePolicyRaw] = await Promise.all([
+      getPreference(riskPosturePrefKey(projectId), database).catch(() => null),
+      getPreference(redBasePolicyPrefKey(projectId), database).catch(() => null),
+    ]);
+    const prefMap = new Map<string, string>();
+    if (postureRaw) prefMap.set(riskPosturePrefKey(projectId), postureRaw);
+    if (redBasePolicyRaw) prefMap.set(redBasePolicyPrefKey(projectId), redBasePolicyRaw);
+    const requestedPosture = resolveRiskPosture(prefMap, projectId);
+    // #916 — a ledger over its cap must not keep softening verdicts forever; it degrades
+    // the EFFECTIVE policy instead (#1740: through the one resolver the train veto and the
+    // delivery chip also read). Same open-ledger snapshot the verdict reads below.
+    const effective = await resolveEffectiveRedBasePolicyFor(projectId, database, { posture: requestedPosture });
+    const ledger = effective.ledger;
+    const capResult = effective.cap;
+    const redBasePolicy = capResult.effectivePolicy;
+    if (capResult.degraded) {
+      console.log(`[workspace-merge] ${capResult.note}`);
+    }
+    const subsetRuleBehaviour = redDebtGatePostureForPolicy(redBasePolicy);
+    if (subsetRuleBehaviour) {
+      const verdict = resolveRedDebtGateVerdict({
+        failedSuites,
+        ledger: ledger.map((e) => ({ suite: e.suite, tag: e.tag as "flaky" | "real" })),
+        posture: subsetRuleBehaviour,
+      });
+      if (verdict.outcome === "pass-with-debt" || verdict.outcome === "pass-with-new-debt") {
+        if (verdict.outcome === "pass-with-new-debt") {
+          const sinceCommit = baseHealthRecordedSha ?? "unknown";
+          for (const suite of verdict.newRed) {
+            await openRedDebtEntry({ projectId, suite, sinceCommit, tag: "real" }, database).catch((err) => {
+              console.warn(`[workspace-merge] failed to open red-debt entry for ${suite} (non-fatal):`, errorMessage(err));
+            });
+          }
+        }
+        // Decision 017's visibility rule: a passing gate must name what softened it. The
+        // policy is part of that whenever it is not `block` — otherwise a reader cannot
+        // tell a level-derived softening from a per-project override (#1015).
+        const policyNote = `redBasePolicy '${redBasePolicy}'`;
+        console.log(
+          `[workspace-merge] pre-lock gate softened by red-debt subset rule (#915, ${policyNote}) `
+            + `for workspace ${workspaceId}: ${verdict.message}`,
+        );
+        // Mint proof, exactly as a genuine pass does (`runGateWithEvidence`'s `token`
+        // field) — returning the caller's original `run-gate` token here would let the
+        // executor's in-lock `resolveMergeGate` call re-run `runPreMergeGate`, which has
+        // no knowledge of this subset rule and would fail on the SAME suites again,
+        // silently discarding the softened verdict this block just decided on.
+        return gateAlreadyPassed({
+          ranAt: new Date().toISOString(),
+          stage: preGate.stage,
+          source: `pre-lock-merge (red-debt subset rule #915, ${policyNote}: ${verdict.message})`,
+          branchSha: preGate.shasBefore.branchSha ?? undefined,
+          baseSha: preGate.shasBefore.baseSha ?? undefined,
+        });
+      }
+    }
+  } catch (err) {
+    console.warn(
+      "[workspace-merge] red-debt subset-rule check failed (non-fatal, gate stays withheld):",
+      errorMessage(err),
+    );
+  }
+  return null;
+}
+
+/** The pre-lock gate failed: try the red-debt softening, else record the note and withhold (throws). */
+async function resolveFailedPreGate(args: {
+  workspaceId: string; workspace: WorkspaceRow; projectId: string; baseBranch: string; preGate: PreGate;
+  database: Database; recordMergeAttempt: RecordMergeAttempt;
+}): Promise<MergeGateToken> {
+  const { workspaceId, workspace, projectId, baseBranch, preGate, database, recordMergeAttempt } = args;
+  const attributed = workspace.workingDir
+    ? await attributeGateFailureToBase({ projectId, workingDir: workspace.workingDir, baseBranch, preGateMessage: preGate.message, database })
+    : { gateMessage: preGate.message, failedSuites: null, baseHealthRecordedSha: null };
+  const { gateMessage, failedSuites, baseHealthRecordedSha } = attributed;
+  // A gate failure with no suite list (smoke/install failure, or a base probe that never ran)
+  // carries no evidence a ledger entry could match, so it is never softened.
+  if (failedSuites && failedSuites.length > 0) {
+    const softened = await softenByRedDebtSubsetRule({ workspaceId, projectId, preGate, failedSuites, baseHealthRecordedSha, database });
+    if (softened) return softened;
+  }
+  await recordGateFailureNote({
+    workspace,
+    stage: preGate.stage,
+    gateMessage,
+    targetBranch: baseBranch,
+    database,
+    recordMergeAttempt,
+  });
+  throwWithheldPreMergeGate(preGate, gateMessage);
+}
+
+
 export async function runPreLockGate(args: {
   workspaceId: string;
   workspace: WorkspaceRow;
@@ -592,18 +778,10 @@ export async function runPreLockGate(args: {
 
   // #1671 — a rebase can drop every commit (the base already carries the change): nothing is left
   // to land, so a verify run would only burn a worker for 30 min. doMerge's pre-flight finalizes it.
-  if (rebased && workspace.workingDir) {
-    // rev-list must answer "0": countUniqueCommits reads a git error as 0, which would skip the gate on any failure.
-    const emptyAfterRebase = await Promise.resolve().then(async () => {
-      const ahead = await gitExec(["rev-list", "--count", `${baseBranch}..HEAD`], { cwd: workspace.workingDir! });
-      return execSucceeded(ahead) && ahead.stdout.trim() === "0"
-        && (await listPendingSiblingMerges(realGitService, database, workspaceId)).length === 0;
-    }).catch(() => false);
-    if (emptyAfterRebase) {
-      const reason = `no commits beyond '${baseBranch}' after the rebase (#1671) — nothing to land, gate skipped`;
-      console.log(`[workspace-merge] ${reason} for workspace ${workspaceId}`);
-      return { kind: "skip-explicit", reason };
-    }
+  if (rebased && workspace.workingDir && await isEmptyAfterRebase(workspace.workingDir, baseBranch, workspaceId, database)) {
+    const reason = `no commits beyond '${baseBranch}' after the rebase (#1671) — nothing to land, gate skipped`;
+    console.log(`[workspace-merge] ${reason} for workspace ${workspaceId}`);
+    return { kind: "skip-explicit", reason };
   }
 
   console.log(`[workspace-merge] pre-lock gate phase=start workspaceId=${workspaceId}`);
@@ -615,155 +793,7 @@ export async function runPreLockGate(args: {
   });
 
   if (!preGate.passed) {
-    // #491 — before blaming this branch, check whether the base was ALREADY red at the
-    // branch's merge-base. Best-effort: a failure here must never mask the real gate failure,
-    // it can only ADD attribution to it.
-    let gateMessage = preGate.message;
-    let failedSuites: string[] | null = null;
-    let baseHealthRecordedSha: string | null = null;
-    if (workspace.workingDir) {
-      try {
-        const baseHealth = await getBaseBranchHealthAtMergeBase(
-          projectId,
-          workspace.workingDir,
-          "HEAD",
-          baseBranch,
-          database,
-        );
-        baseHealthRecordedSha = baseHealth.recordedSha ?? null;
-        const attribution = describeRedBaseAttribution(baseHealth);
-        if (attribution) gateMessage = `${attribution}\n\n${preGate.message}`;
-        // #935 — a NON-ANSWER record (`timeout`/`unverified`) is a probe that could not speak,
-        // and it is sticky: the periodic sweep backs a timeout off by a full
-        // PROBE_MAX_DURATION_MS on top of its interval, so an hour-plus of gates can run
-        // against a verdict nobody measured. A gate failing here is the moment we most want
-        // the base's real state, so ask for a fresh probe rather than waiting the sweep out.
-        //
-        // Routed through `requestBaseBranchReprobe`, NOT `verifyBaseBranchHealth` directly:
-        // the probe is a clone + install + full verify, and the two guards that keep it from
-        // becoming the saturation it measures — the #931 `gateBusy` yield and the #712
-        // `timeout` back-off — live in that due-check, not in the probe. Calling the probe
-        // straight from here would re-spawn a 45-minute verify on EVERY failing gate for as
-        // long as the non-answer row stands, which is precisely this ticket's failure mode.
-        // The in-flight map only dedups overlapping probes; it does not decide whether one
-        // should start.
-        //
-        // Fire-and-forget: it must never delay or fail this gate — the withhold below stands
-        // either way, and the fresh verdict (if it runs) lands for the NEXT gate.
-        if (baseHealth.health && (baseHealth.stale || !isBaseHealthAnswer(baseHealth.health.outcome))) {
-          console.log(
-            `[workspace-merge] base health for project ${projectId} is a non-answer `
-              + `('${baseHealth.health.outcome}') — requesting a fresh probe if due (#935)`,
-          );
-          // Kept as a dynamic import: `base-branch-health-reprobe.service.ts` is now a sibling
-          // service (#947 moved it out of `startup/`, so the layering reason is gone), but this
-          // module is on the merge gate's hot path and the reprobe door is reached only on a
-          // non-answer base row. Deferring the load keeps that cost off every gate.
-          void import("./base-branch-health-reprobe.service.js")
-            .then((m) => m.requestBaseBranchReprobe(projectId, database))
-            .catch(() => {});
-        }
-        if (baseHealth.health?.failedSuites) {
-          try {
-            failedSuites = JSON.parse(baseHealth.health.failedSuites) as string[];
-          } catch {
-            failedSuites = null;
-          }
-        }
-      } catch (err) {
-        console.warn(
-          "[workspace-merge] failed to resolve base-branch health attribution (non-fatal):",
-          err instanceof Error ? err.message : String(err),
-        );
-      }
-    }
-
-    // #915 — the red-debt subset rule. A known-red suite must no longer block a `fast`/`sprint`
-    // train; a NEW red suite still does. Only meaningful when the base-health probe could name
-    // WHICH suites failed (`failedSuites`) — a gate failure with no suite list (a smoke/install
-    // failure, or a base probe that never ran) carries no evidence a ledger entry could match,
-    // so it is never softened.
-    if (failedSuites && failedSuites.length > 0) {
-      try {
-        // #1015 — the rule keys on `posture.redBasePolicy`, NOT on the posture LEVEL. The two
-        // agreed exactly while the policy was derived from the level alone, but a project may
-        // now reach a soft policy without a soft level via the softer-only per-project
-        // red-base-policy project override (decision 017, Amendment 2026-09-04) — which is what
-        // lets the dev board "land, then heal" on posture `iterate` instead of having to adopt
-        // `fast`'s gate tier, review mode and train sizing to get there.
-        const [postureRaw, redBasePolicyRaw] = await Promise.all([
-          getPreference(riskPosturePrefKey(projectId), database).catch(() => null),
-          getPreference(redBasePolicyPrefKey(projectId), database).catch(() => null),
-        ]);
-        const prefMap = new Map<string, string>();
-        if (postureRaw) prefMap.set(riskPosturePrefKey(projectId), postureRaw);
-        if (redBasePolicyRaw) prefMap.set(redBasePolicyPrefKey(projectId), redBasePolicyRaw);
-        const requestedPosture = resolveRiskPosture(prefMap, projectId);
-        // #916 — a ledger over its cap must not keep softening verdicts forever; it degrades
-        // the EFFECTIVE policy instead (#1740: through the one resolver the train veto and the
-        // delivery chip also read). Same open-ledger snapshot the verdict reads below.
-        const effective = await resolveEffectiveRedBasePolicyFor(projectId, database, { posture: requestedPosture });
-        const ledger = effective.ledger;
-        const capResult = effective.cap;
-        const redBasePolicy = capResult.effectivePolicy;
-        if (capResult.degraded) {
-          console.log(`[workspace-merge] ${capResult.note}`);
-        }
-        const subsetRuleBehaviour = redDebtGatePostureForPolicy(redBasePolicy);
-        if (subsetRuleBehaviour) {
-          const verdict = resolveRedDebtGateVerdict({
-            failedSuites,
-            ledger: ledger.map((e) => ({ suite: e.suite, tag: e.tag as "flaky" | "real" })),
-            posture: subsetRuleBehaviour,
-          });
-          if (verdict.outcome === "pass-with-debt" || verdict.outcome === "pass-with-new-debt") {
-            if (verdict.outcome === "pass-with-new-debt") {
-              const sinceCommit = baseHealthRecordedSha ?? "unknown";
-              for (const suite of verdict.newRed) {
-                await openRedDebtEntry({ projectId, suite, sinceCommit, tag: "real" }, database).catch((err) => {
-                  console.warn(`[workspace-merge] failed to open red-debt entry for ${suite} (non-fatal):`, errorMessage(err));
-                });
-              }
-            }
-            // Decision 017's visibility rule: a passing gate must name what softened it. The
-            // policy is part of that whenever it is not `block` — otherwise a reader cannot
-            // tell a level-derived softening from a per-project override (#1015).
-            const policyNote = `redBasePolicy '${redBasePolicy}'`;
-            console.log(
-              `[workspace-merge] pre-lock gate softened by red-debt subset rule (#915, ${policyNote}) `
-                + `for workspace ${workspaceId}: ${verdict.message}`,
-            );
-            // Mint proof, exactly as a genuine pass does (`runGateWithEvidence`'s `token`
-            // field) — returning the caller's original `run-gate` token here would let the
-            // executor's in-lock `resolveMergeGate` call re-run `runPreMergeGate`, which has
-            // no knowledge of this subset rule and would fail on the SAME suites again,
-            // silently discarding the softened verdict this block just decided on.
-            return gateAlreadyPassed({
-              ranAt: new Date().toISOString(),
-              stage: preGate.stage,
-              source: `pre-lock-merge (red-debt subset rule #915, ${policyNote}: ${verdict.message})`,
-              branchSha: preGate.shasBefore.branchSha ?? undefined,
-              baseSha: preGate.shasBefore.baseSha ?? undefined,
-            });
-          }
-        }
-      } catch (err) {
-        console.warn(
-          "[workspace-merge] red-debt subset-rule check failed (non-fatal, gate stays withheld):",
-          errorMessage(err),
-        );
-      }
-    }
-
-    await recordGateFailureNote({
-      workspace,
-      stage: preGate.stage,
-      gateMessage,
-      targetBranch: baseBranch,
-      database,
-      recordMergeAttempt,
-    });
-    throwWithheldPreMergeGate(preGate, gateMessage);
+    return resolveFailedPreGate({ workspaceId, workspace, projectId, baseBranch, preGate, database, recordMergeAttempt });
   }
 
   if (preGate.unverified) {
