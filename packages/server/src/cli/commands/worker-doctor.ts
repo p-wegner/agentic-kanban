@@ -461,6 +461,7 @@ import { resolveProviderAuthDir } from "./worker-doctor-provider-auth.js";
 import type { WorkerHarness } from "../../worker/worker-harness.js";
 import { bindDefaultAlias } from "../../worker/worker-profile-aliases.js";
 import { checkAttestedProfiles, checkHarness } from "./worker-doctor-harness.js";
+import { checkFreeDisk } from "./worker-doctor-disk.js";
 import { checkPendingDeletes, checkUndeliveredResults } from "./worker-doctor-undelivered.js";
 
 /**
@@ -716,6 +717,7 @@ export async function runWorkerDoctor(opts: WorkerDoctorOptions): Promise<Doctor
   checks.push(await checkCloneIntegrity(opts.workRoot ?? defaultWorkerWorkRoot(opts.stateFile)));
   const indexing = await checkContentIndexing(opts.workRoot ?? defaultWorkerWorkRoot(opts.stateFile)); // #1520
   if (indexing) checks.push(indexing);
+  checks.push(checkFreeDisk(opts.workRoot ?? defaultWorkerWorkRoot(opts.stateFile))); // #1768
   checks.push(checkUndeliveredResults(opts.workRoot ?? defaultWorkerWorkRoot(opts.stateFile)));
   checks.push(checkPendingDeletes(opts.workRoot ?? defaultWorkerWorkRoot(opts.stateFile)));
   if (opts.harness) checks.push(...checkHarness(opts.harness, opts.providers, undefined, { notes: opts.harnessNotes, legacy: opts.harnessLegacy }));

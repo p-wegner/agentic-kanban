@@ -3,7 +3,7 @@
 // remote execution service — so the REST routes, the WS route and the session
 // lifecycle all see the SAME fleet state in one board process.
 import { listActiveVerifyJobs, verifyJobCountOnWorker } from "./verify-active-jobs.js";
-import { workerBelowRamFloor } from "@agentic-kanban/shared/lib/worker-settings";
+import { MIN_FREE_DISK_GB_BUILDER, workerBelowDiskFloor, workerBelowRamFloor } from "@agentic-kanban/shared/lib/worker-settings";
 import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
 import { splitRequirements, workerMeetsRequirements } from "@agentic-kanban/shared/lib/worker-toolchains";
 import { requestToolchainInstalls } from "./toolchain-install.service.js";
@@ -291,6 +291,8 @@ function filterEligibleWorkers(
     .filter((w) => allowWorkerIds === undefined || allowWorkerIds.has(w.id))
     // #1451: below its own free-RAM floor a worker takes no new session until the heartbeat shows it recovered.
     .filter((w) => !workerBelowRamFloor(w.desiredSettings?.settings, w.capacity?.freeRamGb).below)
+    // #1768: a nearly full disk takes no new session.
+    .filter((w) => !workerBelowDiskFloor(w.capacity?.freeDiskGb, MIN_FREE_DISK_GB_BUILDER).below)
     // #1456: an auto worker in live back-off (thrashing, free RAM under the reserve) takes no new session.
     .filter((w) => !w.concurrency?.hold)
     // #1426: a worker whose only login for this provider is dead would burn the session in ~1 s.

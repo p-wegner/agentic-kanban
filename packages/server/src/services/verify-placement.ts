@@ -166,6 +166,13 @@ export function isTimeoutOnlyFailure(log: string | undefined): boolean {
   return !!log && TIMEOUT_RE.test(log) && !NON_TIMEOUT_FAILURE_RE.test(log);
 }
 
+const DISK_FULL_RE = /SQLITE_FULL|database or disk is full|\bENOSPC\b|no space left on device/i;
+
+/** #1768: a verify log that says the worker's disk filled up: infrastructure, not a verdict on the tree. */
+export function isDiskFullLog(log: string | undefined): boolean {
+  return !!log && DISK_FULL_RE.test(log);
+}
+
 const RUNTIME_REFUSAL_RE = /Your node version is not supported|Unsupported engine|ERR_PNPM_UNSUPPORTED_ENGINE|requires node (?:version )?[<>=^~]|The engine "node" is incompatible/i;
 
 /** #1710: a verify log that says the toolchain refused to start (an unsupported Node runtime), not that the tree failed. */

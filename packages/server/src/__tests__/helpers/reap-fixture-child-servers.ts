@@ -25,6 +25,7 @@
  * deliberately self-contained (no DB, no server imports) so `globalSetup` cannot drag the
  * application graph into the test bootstrap.
  */
+import { statfsSync } from "node:fs";
 import { readdir, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -198,8 +199,28 @@ export function matchedNamespace(name: string): { minAgeMs: number } | null {
   return null;
 }
 
+/** #1768: free disk under which the reaper sweeps fixture dirs regardless of how fresh they are. */
+const EMERGENCY_FREE_DISK_GB = 10;
+/** #1768: even in an emergency, a dir touched this recently may still be in use by a live suite. */
+const EMERGENCY_MIN_AGE_MS = 5 * 60 * 1000;
+
+export function isDiskEmergency(freeGb: number | undefined): boolean {
+  return freeGb !== undefined && freeGb < EMERGENCY_FREE_DISK_GB;
+}
+
+function freeTempDiskGb(dir: string): number | undefined {
+  try {
+    const st = statfsSync(dir);
+    return (st.bavail * st.bsize) / 1024 ** 3;
+  } catch {
+    return undefined;
+  }
+}
+
 async function reapStaleFixtureTempDirs(entries: string[]): Promise<number> {
   const base = tmpdir();
+  const emergency = isDiskEmergency(freeTempDiskGb(base));
+  if (emergency) console.warn(`[test-reaper] free disk is under ${EMERGENCY_FREE_DISK_GB} GB - emergency sweep, fixture age floor lowered to ${EMERGENCY_MIN_AGE_MS / 60000} min`);
   const now = Date.now();
   let removed = 0;
   let failed = 0;
@@ -225,7 +246,7 @@ async function reapStaleFixtureTempDirs(entries: string[]): Promise<number> {
     try {
       const info = await stat(full);
       // Directories only — `kanban-session-*.out` transcripts are files the running server reads.
-      if (!info.isDirectory() || info.mtimeMs > now - ns.minAgeMs) continue;
+      if (!info.isDirectory() || info.mtimeMs > now - (emergency ? Math.min(ns.minAgeMs, EMERGENCY_MIN_AGE_MS) : ns.minAgeMs)) continue;
       await rm(full, { recursive: true, force: true, maxRetries: 1 });
       removed++;
     } catch {
