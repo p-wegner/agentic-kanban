@@ -57,6 +57,8 @@ export interface GateRunPlan {
   holdIfRefused: <R extends object>(result: R) => R | (R & { held: true; message: string });
   /** #1671: true when the worker job ended because the board cancelled it (not a worker refusal). */
   wasCancelled?: () => boolean;
+  /** #1779: true when the worker refused the job; nothing was verified, so the ledger records no row. */
+  wasRefused?: () => boolean;
 }
 
 /** The refusal text for a cancelled job, or null for a real refusal (#1671). */
@@ -130,5 +132,5 @@ export async function planGateRun(args: {
     refusal === null ? result : describeCancelledRefusal(refusal) !== null ? { ...result, held: true, message: `pre-merge gate HELD — ${describeCancelledRefusal(refusal)}. Nothing was verified and nothing failed; the merge is deferred and will be retried on the next cycle.` } : { ...result, held: true, message: `pre-merge gate HELD — verify worker ${placed.workerName} refused the job (${refusal}). Nothing was verified and nothing failed; the merge is deferred and will be retried on the next cycle.` };
   // The chain line reads "on a+b (2 shards)"; each shard's stage and files done/total show as its own active job.
   const workerName = shardPlans.length >= 2 ? `${shardPlans.map((p) => p.workerName).join("+")} (${shardPlans.length} shards)` : placed.workerName;
-  return { proceed, run, workerName, hold, holdIfRefused, wasCancelled: () => refusal !== null && describeCancelledRefusal(refusal) !== null };
+  return { proceed, run, workerName, hold, holdIfRefused, wasCancelled: () => refusal !== null && describeCancelledRefusal(refusal) !== null, wasRefused: () => refusal !== null };
 }
