@@ -153,6 +153,17 @@ function readNonNegativeInt(raw: string | undefined): number | null {
 }
 
 /**
+ * #1771 - `maxSize` is also the MEMBERSHIP cap: a released window departs with at most `maxSize`
+ * members (input order, oldest-first as the orchestrator lists them); the rest stay pending for
+ * the next window with their `firstSeenAt` preserved. Without it a window that closed on
+ * `max_size` released every ready workspace, and 16-20 member trains went red as a unit.
+ */
+export function splitTrainRelease(ids: string[], maxSize: number): { released: string[]; remaining: string[] } {
+  const cap = Math.max(1, Math.floor(maxSize));
+  return { released: ids.slice(0, cap), remaining: ids.slice(cap) };
+}
+
+/**
  * Operator controls (#1186), judged ahead of size/wait:
  *
  *  - `heldUntilMs` — "hold the door": while `nowMs < heldUntilMs` the verdict is

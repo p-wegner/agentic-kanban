@@ -91,7 +91,7 @@ describe("buildDeliveryChipView (#1155)", () => {
     expect(view.label).toBe("Iterate · train 1 (no batching)");
     expect(view.compactLabel).toBe("Iterate · 1");
     expect(view.title).toContain("Risk posture: Iterate (source: risk_posture)");
-    expect(view.title).toContain("Merge train: max 1, wait 0 (never batches for time)");
+    expect(view.title).toContain("Merge train: max 1 members, wait 0 (never batches for time)");
   });
 
   it("a batching train shows its size and wait", () => {
@@ -102,12 +102,12 @@ describe("buildDeliveryChipView (#1155)", () => {
       trainWindowFromPosture: true,
     }));
     expect(view.label).toBe("Fast · train 8");
-    expect(view.title).toContain("Merge train: max 8, wait 20 min");
+    expect(view.title).toContain("Merge train: max 8 members, wait 20 min");
   });
 
   it("an explicit project override is named in the tooltip", () => {
     const view = buildDeliveryChipView(status({ trainWindowMaxSize: 4, trainSizeFromOverride: true }));
-    expect(view.title).toContain("Merge train: max 4, wait 0 (never batches for time) (project override)");
+    expect(view.title).toContain("Merge train: max 4 members, wait 0 (never batches for time) (project override)");
   });
 
   it("the dot color follows the posture level", () => {
