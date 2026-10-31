@@ -201,6 +201,21 @@ export async function getShaSweepEvidence(
   return { green: at.some((row) => row.outcome === "green"), red: at.filter((row) => row.outcome === "red").length };
 }
 
+/**
+ * #1787: the newest verdict row for `sha` recorded at or after `sinceIso`, whatever lane it landed in.
+ * A rc sweep whose row carries the wrong branch (or was folded onto the base lane's row) would otherwise
+ * never be seen by the branch-keyed read, leaving the candidate `sweeping` forever.
+ */
+export async function getLatestHealthAtSha(
+  projectId: string,
+  sha: string,
+  sinceIso: string | null,
+  database: Database = db,
+) {
+  const rows = await database.select().from(baseBranchHealth).where(and(eq(baseBranchHealth.projectId, projectId), eq(baseBranchHealth.sha, sha))).orderBy(desc(baseBranchHealth.createdAt));
+  return rows.find((r) => isBaseHealthAnswer(r.outcome) && (!sinceIso || r.createdAt >= sinceIso)) ?? null;
+}
+
 /** Most-recent-first history for a project, capped by limit (default 20). */
 export async function listBaseBranchHealth(
   projectId: string,

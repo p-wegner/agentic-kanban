@@ -27,7 +27,7 @@ import type { RcSweepMode } from "@agentic-kanban/shared/types";
 import type { Database } from "../db/index.js";
 import { getAllPreferences, getPreference } from "../repositories/preferences.repository.js";
 import { getProjectById } from "../repositories/project.repository.js";
-import { getLatestBaseBranchHealth, getShaSweepEvidence, decodeFailedSuites, isBaseHealthAnswer } from "../repositories/base-branch-health.repository.js";
+import { getLatestBaseBranchHealth, getLatestHealthAtSha, getShaSweepEvidence, decodeFailedSuites, isBaseHealthAnswer } from "../repositories/base-branch-health.repository.js";
 import { listActiveMergeTrainsForProject } from "../repositories/merge-train.repository.js";
 import { baseHealthProbeStartPrefKey } from "./base-branch-health.service.js";
 import { requestBaseBranchReprobe, resolveGateBusy } from "./base-branch-health-reprobe.service.js";
@@ -156,6 +156,8 @@ export interface RollingRcSweepDeps {
   readState: (project: RollingRcProject) => RcStateFile;
   writeState: (project: RollingRcProject, state: RcStateFile) => void;
   readLatestRcHealth: (projectId: string, branch: string) => Promise<RollingRcHealthRow | null>;
+  /** #1787: a verdict row for `sha` from ANY lane recorded since `sinceIso` — the fallback when the rc-branch row is missing. */
+  readHealthAtSha?: (projectId: string, sha: string, sinceIso: string | null) => Promise<RollingRcHealthRow | null>;
   /** #1681: green / red history of one sha, across every branch that swept it. */
   readShaEvidence?: (projectId: string, sha: string) => Promise<{ green: boolean; red: number }>;
   /** Start a background sweep of the branch; true when one actually started. */
@@ -203,7 +205,10 @@ async function tickProject(project: RollingRcProject, deps: RollingRcSweepDeps, 
 
   // 1. Record the verdict that landed for the candidate's tip — green/red on the rc sha.
   if (candidate && tipSha && (candidate.state === "cut" || candidate.state === "sweeping")) {
-    const row = await deps.readLatestRcHealth(projectId, candidate.branch);
+    let row = await deps.readLatestRcHealth(projectId, candidate.branch);
+    if (!(row && row.sha === tipSha && isBaseHealthAnswer(row.outcome)) && deps.readHealthAtSha) {
+      row = (await deps.readHealthAtSha(projectId, tipSha, candidate.cutAt ?? candidate.updatedAt)) ?? row;
+    }
     if (row && row.sha === tipSha && isBaseHealthAnswer(row.outcome)) {
       const evidence = row.outcome === "red" && deps.readShaEvidence ? await deps.readShaEvidence(projectId, tipSha) : null;
       if (evidence && evidence.green && evidence.red <= 1) {
@@ -336,6 +341,10 @@ export function createRollingRcSweepDeps(database: Database, listProjects: Rolli
     },
     readLatestRcHealth: async (projectId, branch) => {
       const row = await getLatestBaseBranchHealth(projectId, database, { branch }).catch(() => null);
+      return row ? { sha: row.sha, outcome: row.outcome, failedSuites: decodeFailedSuites(row.failedSuites) } : null;
+    },
+    readHealthAtSha: async (projectId, sha, sinceIso) => {
+      const row = await getLatestHealthAtSha(projectId, sha, sinceIso, database).catch(() => null);
       return row ? { sha: row.sha, outcome: row.outcome, failedSuites: decodeFailedSuites(row.failedSuites) } : null;
     },
     readShaEvidence: (projectId, sha) => getShaSweepEvidence(projectId, sha, database).catch(() => ({ green: false, red: 0 })),
