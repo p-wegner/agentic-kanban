@@ -61,6 +61,9 @@ import { getRecentSessionBriefs } from "../repositories/session.repository.js";
 import { getWorkerBuildService, startWorkerBuildPrewarm } from "../services/worker-build.service.js";
 import { startWorkerAutoUpdate, stopWorkerAutoUpdate } from "../services/worker-auto-update.service.js";
 
+/** #1787: last logged rolling-rc decision per project, so a skip is logged when it changes, not every tick. */
+const rcSkipLast = new Map<string, string>();
+
 /**
  * Background-service (start/stop) plugin registry — the append target for periodic
  * reconcilers, schedulers and supervisors that used to be a hand-written
@@ -130,6 +133,12 @@ export const BACKGROUND_SERVICES: BackgroundService[] = [
           for (const r of results) {
             if (r.started) console.log(`[scheduler] rolling rc sweep started for project ${r.projectId} (${r.decision.action} ${r.branch ?? "?"})`);
             else if (r.error) console.warn(`[scheduler] rolling rc sweep for project ${r.projectId} failed: ${r.error}`);
+            // #1787: a skip was invisible; log the reason whenever it changes.
+            const why = r.decision.action === "skip" ? `skip:${r.decision.reason}` : `${r.decision.action}:not-started`;
+            if (!r.started && rcSkipLast.get(r.projectId) !== why) {
+              rcSkipLast.set(r.projectId, why);
+              console.log(`[scheduler] rolling rc sweep for project ${r.projectId}: ${why} (${r.branch ?? "no candidate"})`);
+            } else if (r.started) rcSkipLast.delete(r.projectId);
           }
         },
         runPromoteCadenceTick: async () => {

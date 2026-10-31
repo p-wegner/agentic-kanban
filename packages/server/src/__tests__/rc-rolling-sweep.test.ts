@@ -211,3 +211,15 @@ describe("rc-state writer mirror", () => {
     });
   });
 });
+
+describe("rolling rc sweep: verdict row missing the rc branch (#1787)", () => {
+  it("mirrors a red verdict recorded under another lane for the swept sha", async () => {
+    const { board, deps } = fakeBoard();
+    await runRollingRcSweepTick(deps);
+    board.probeInFlight = false;
+    deps.readHealthAtSha = async () => ({ sha: "m1", outcome: "red", failedSuites: ["a.test.ts"] });
+    const [r] = await runRollingRcSweepTick(deps);
+    expect(r!.decision).toEqual({ action: "skip", reason: "rc_red" });
+    expect(findRcCandidate(board.state, "rc/20261019")).toMatchObject({ state: "red", failedSuites: ["a.test.ts"] });
+  });
+});
