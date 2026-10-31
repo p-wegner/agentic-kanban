@@ -38,6 +38,7 @@ import {
   machineVerifyLockEnabled,
   describeHolder,
 } from "../lib/machine-verify-lock.js";
+import { readPlacementWorkers, type PlacementWorkers } from "./verify-job-placement.js";
 import { placementAwareSaturation, planProbePlacement } from "./base-branch-health-placement.js";
 import { holdReprobe, clearHeldReprobe } from "./base-branch-reprobe-hold.js";
 import {
@@ -312,6 +313,8 @@ export async function resolveBaseHealthProbeDue(
     readCapacity?: () => Tier0Capacity;
     /** Injected for tests; defaults to the live CPU sample (#1173). */
     readCpuPct?: () => Promise<number | null>;
+    /** #1789: the decision's one shared worker read; every placement plan reuses it. */
+    workersRead?: PlacementWorkers;
   } = {},
 ): Promise<BaseHealthDueVerdict> {
   const latest = await getLatestBaseBranchHealth(projectId, database).catch(() => null);
@@ -329,7 +332,7 @@ export async function resolveBaseHealthProbeDue(
   const saturation: HeavyProbeSaturation = classifyHeavyProbeSaturation({ freeGb: capacity.freeGb, cpuPct });
   return isBaseHealthProbeDue({
     // #1437: a saturated host does not defer the probe when an allowlisted worker can take it.
-    hostSaturated: await placementAwareSaturation(saturation.hold ? saturation.reason : null, projectId, database),
+    hostSaturated: await placementAwareSaturation(saturation.hold ? saturation.reason : null, projectId, database, opts.workersRead),
     nowMs,
     intervalMs,
     lastResultAt: latest?.createdAt ?? null,
@@ -350,11 +353,11 @@ export async function resolveBaseHealthProbeDue(
  * run (on the host or on a worker). Fail-open: anything unreadable means "not held", which keeps
  * the pre-#1471 behaviour of attempting the probe.
  */
-async function reprobePlacementHold(projectId: string, database: Database, branch: string | null): Promise<string | null> {
+async function reprobePlacementHold(projectId: string, database: Database, branch: string | null, workersRead?: PlacementWorkers): Promise<string | null> {
   try {
     const project = await getProjectById(projectId, database);
     if (!project?.defaultBranch) return null;
-    const plan = await planProbePlacement({ projectId, database, isBaseLane: !branch || branch === project.defaultBranch, gateActive: resolveGateBusy() });
+    const plan = await planProbePlacement({ projectId, database, isBaseLane: !branch || branch === project.defaultBranch, gateActive: resolveGateBusy(), workersRead });
     return plan.target === "hold" ? plan.reason : null;
   } catch {
     return null;
@@ -416,11 +419,12 @@ export async function requestBaseBranchReprobe(
   } = {},
 ): Promise<BaseHealthDueVerdict> {
   const ms = opts.decisionTimeoutMs ?? REPROBE_DECISION_TIMEOUT_MS;
+  const progress = { stage: "start" };
   try {
-    return await withTimeout(decideBaseBranchReprobe(projectId, database, intervalMs, nowMs, opts), ms, "re-probe decision");
+    return await withTimeout(decideBaseBranchReprobe(projectId, database, intervalMs, nowMs, opts, progress), ms, "re-probe decision");
   } catch (err) {
     if (!(err instanceof TimeoutError)) throw err;
-    console.warn(`[base-branch-health] on-demand re-probe for project ${projectId} gave up deciding after ${ms}ms (placement_unreadable)`);
+    console.warn(`[base-branch-health] on-demand re-probe for project ${projectId} gave up deciding after ${ms}ms (placement_unreadable); still awaiting: ${progress.stage}`);
     return { due: false, reason: "placement_unreadable" };
   }
 }
@@ -431,12 +435,17 @@ async function decideBaseBranchReprobe(
   intervalMs: number,
   nowMs: number,
   opts: Parameters<typeof requestBaseBranchReprobe>[4] & object,
+  progress: { stage: string },
 ): Promise<BaseHealthDueVerdict> {
+  // #1789: ONE bounded worker read per decision, shared by every placement plan below.
+  const workersRead = readPlacementWorkers();
   let verdict: BaseHealthDueVerdict = { due: false, reason: "recent_result" };
   try {
+    progress.stage = "due check (preferences / capacity / placement / sha)";
     verdict = await resolveBaseHealthProbeDue(projectId, database, intervalMs, nowMs, {
       readCapacity: opts.readCapacity,
       readCpuPct: opts.readCpuPct,
+      workersRead,
     });
     // An EXPLICIT operator request ("that verdict was starved, measure again") is allowed to
     // override the recency/timeout back-off — overriding it is the whole point of the route,
@@ -467,7 +476,7 @@ async function decideBaseBranchReprobe(
     // (`placementAwareSaturation`). For an explicit request that is not a refusal but a hold: route it
     // to the visible held-and-retried path below rather than dropping the request.
     if (opts.ignoreRecency && !verdict.due && verdict.reason === "host_saturated"
-      && await reprobePlacementHold(projectId, database, opts.branch ?? null) !== null) {
+      && await (progress.stage = "host_saturated placement hold", reprobePlacementHold(projectId, database, opts.branch ?? null, workersRead)) !== null) {
       verdict = { due: true, reason: "interval_elapsed" };
     }
     if (opts.background && !verdict.due && (verdict.reason === "recent_result" || verdict.reason === "sha_unchanged")) {
@@ -500,7 +509,8 @@ async function decideBaseBranchReprobe(
         );
       });
     };
-    const heldReason = await reprobePlacementHold(projectId, database, opts.branch ?? null);
+    progress.stage = "pre-start placement hold";
+    const heldReason = await reprobePlacementHold(projectId, database, opts.branch ?? null, workersRead);
     if (heldReason !== null) {
       const held = holdReprobe({
         projectId, branch: opts.branch ?? null, reason: heldReason, nowMs,
