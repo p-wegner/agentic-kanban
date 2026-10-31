@@ -111,7 +111,15 @@ export type VerifyPlan =
 /** Upper bound on the worker read inside a placement decision (#1717). */
 export const PLACEMENT_READ_TIMEOUT_MS = 5_000;
 
-export async function planVerifyPlacement(args: Pick<PlaceVerifyCommandArgs, "kind" | "projectId" | "database" | "hostHeld" | "workerRunner"> & { gateActive?: boolean }): Promise<VerifyPlan> {
+/** One bounded worker read; a caller planning several times in one decision shares it (#1789). Unreadable = nobody eligible. */
+export type PlacementWorkers = Promise<VerifyWorkerCandidate[]>;
+
+export function readPlacementWorkers(workerRunner?: VerifyWorkerRunner | null): Promise<VerifyWorkerCandidate[]> {
+  const active = workerRunner === undefined ? runner : workerRunner;
+  return active ? withTimeout(Promise.resolve(active.listWorkers()), PLACEMENT_READ_TIMEOUT_MS, "placement worker read").catch(() => []) : Promise.resolve([]);
+}
+
+export async function planVerifyPlacement(args: Pick<PlaceVerifyCommandArgs, "kind" | "projectId" | "database" | "hostHeld" | "workerRunner"> & { gateActive?: boolean; workersRead?: Promise<VerifyWorkerCandidate[]> }): Promise<VerifyPlan> {
   const [rawPlacement, rawAllow] = await Promise.all([
     getPreference(verifyPlacementPrefKey(args.projectId), args.database).catch(() => null),
     getPreference(verifyWorkersPrefKey(args.projectId), args.database).catch(() => null),
@@ -121,7 +129,7 @@ export async function planVerifyPlacement(args: Pick<PlaceVerifyCommandArgs, "ki
   const active = args.workerRunner === undefined ? runner : args.workerRunner;
   const allowlist = parseVerifyWorkerAllowlist(rawAllow);
   // #1717: a worker read that never settles must not hang the caller; unreadable means nobody eligible.
-  const workers = active ? await withTimeout(Promise.resolve(active.listWorkers()), PLACEMENT_READ_TIMEOUT_MS, "placement worker read").catch(() => []) : [];
+  const workers = active ? await (args.workersRead ?? readPlacementWorkers(args.workerRunner)) : [];
   const decision = decideVerifyPlacement({ placement, kind: args.kind, hostHeld: args.hostHeld ?? false, allowlist, workers, gateActive: args.gateActive });
   if (decision.target === "hold") return { target: "hold", reason: decision.reason };
   if (decision.target === "host" || !active) return { target: "host", reason: decision.reason };

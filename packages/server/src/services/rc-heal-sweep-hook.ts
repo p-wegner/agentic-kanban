@@ -12,6 +12,36 @@ import type { Database } from "../db/index.js";
 import { getLastGreenBaseBranchHealth, getShaSweepEvidence } from "../repositories/base-branch-health.repository.js";
 import type { BaseBranchVerifyResult } from "./base-branch-health.service.js";
 import { reconcileRcSweep, type RcHealResult } from "./rc-heal-ticket.service.js";
+import { findRcCandidate, isTerminalRcState, readRcState, resolveStableCheckoutFor } from "./rc-state.js";
+import { gitExec } from "@agentic-kanban/shared/lib/git-exec";
+import { execSucceeded } from "@agentic-kanban/shared/lib/exec-result";
+
+/**
+ * #1789: why a red verdict on this rc must NOT file or refresh a heal ticket, or null when it may.
+ * A candidate rc-state marks `abandoned`/`promoted` is dead (a fix merged into it lands nowhere), and an rc
+ * whose sha is already contained in a master sha that swept GREEN has nothing left to heal.
+ */
+export async function rcHealSkipReason(
+  args: { projectId: string; branch: string; sha: string; repoPath: string },
+  database: Database,
+): Promise<string | null> {
+  try {
+    const candidate = findRcCandidate(readRcState(resolveStableCheckoutFor(args.repoPath)), args.branch);
+    if (candidate && isTerminalRcState(candidate.state)) {
+      return `${args.branch} is ${candidate.state} in rc-state; a heal ticket for it would fix a dead candidate`;
+    }
+    const green = await getLastGreenBaseBranchHealth(args.projectId, database).catch(() => null);
+    if (green?.sha) {
+      const contained = await gitExec(["merge-base", "--is-ancestor", args.sha, green.sha], { cwd: args.repoPath, timeout: 15_000 });
+      if (execSucceeded(contained)) {
+        return `${args.branch} at ${args.sha.slice(0, 12)} is already contained in the base's green sweep at ${green.sha.slice(0, 12)}; nothing left to heal`;
+      }
+    }
+  } catch {
+    // Fail open: an unreadable rc-state or repo must not hide a real red.
+  }
+  return null;
+}
 
 export async function reconcileRcSweepAfterProbe(
   args: {
@@ -31,6 +61,13 @@ export async function reconcileRcSweepAfterProbe(
     ?? await getLastGreenBaseBranchHealth(args.projectId, database).catch(() => null);
   // #1681: a red on a sha that already swept green is a load flake until an idle re-run says otherwise.
   const evidence = args.result.outcome === "red" ? await getShaSweepEvidence(args.projectId, args.result.sha, database).catch(() => null) : null;
+  if (args.result.outcome === "red") {
+    const skip = await rcHealSkipReason({ projectId: args.projectId, branch: args.branch, sha: args.result.sha, repoPath: args.repoPath }, database);
+    if (skip) {
+      console.log(`[rc-heal] project ${args.projectId}: no heal ticket for red ${args.branch} - ${skip}`);
+      return { action: "noop", reason: skip, issueIds: [], issueNumbers: [] };
+    }
+  }
   return reconcileRcSweep({
     flakeRerunOwed: evidence ? evidence.green && evidence.red <= 1 : false,
     projectId: args.projectId,

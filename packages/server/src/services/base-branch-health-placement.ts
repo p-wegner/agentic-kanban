@@ -17,7 +17,7 @@ import { CONTENTION_RETRY_ENV } from "./verify-flake-retry.js";
 import { resolveRedProbeOutcome } from "./base-branch-red-outcome.js";
 import type { BaseBranchVerifyResult } from "./base-branch-health.service.js";
 import { failedSuitesForOutcome } from "./failed-suite-parse.js";
-import { planVerifyPlacement, runOnPlannedWorker, type VerifyPlan } from "./verify-job-placement.js";
+import { planVerifyPlacement, runOnPlannedWorker, type VerifyPlan, type PlacementWorkers } from "./verify-job-placement.js";
 import { isRuntimeRefusalLog, rankVerifyWorkers, type VerifyChainKind } from "./verify-placement.js";
 import {
   checkShardCoverage, DEFAULT_SWEEP_PACKAGES, formatSweepProgress, mergeShardVerdicts, parseShardTimings, planSweepShards, recordShardTimings, runShardedSweep,
@@ -38,19 +38,19 @@ export async function hostTooTightForProbe(): Promise<string | null> {
  * defer the probe when an allowlisted worker can take it, and `verify_placement=worker` with nobody
  * eligible defers it (reported through the same field) rather than running it on the host.
  */
-export async function placementAwareSaturation(saturated: string | null, projectId: string, database: Database): Promise<string | null> {
-  const plan = await planVerifyPlacement({ kind: "base-probe", projectId, database, hostHeld: saturated !== null }).catch(() => null);
+export async function placementAwareSaturation(saturated: string | null, projectId: string, database: Database, workersRead?: PlacementWorkers): Promise<string | null> {
+  const plan = await planVerifyPlacement({ kind: "base-probe", projectId, database, hostHeld: saturated !== null, workersRead }).catch(() => null);
   return plan?.target === "hold" ? plan.reason : plan?.target === "worker" ? null : saturated;
 }
 
 /** Host / worker / hold for one probe or sweep. Reads host load only when the project opted into placement. */
-export async function planProbePlacement(args: { projectId: string; database: Database; isBaseLane: boolean; gateActive?: boolean }): Promise<VerifyPlan> {
+export async function planProbePlacement(args: { projectId: string; database: Database; isBaseLane: boolean; gateActive?: boolean; workersRead?: PlacementWorkers }): Promise<VerifyPlan> {
   const kind: VerifyChainKind = args.isBaseLane ? "base-probe" : "rc-sweep";
-  const first = await planVerifyPlacement({ kind, projectId: args.projectId, database: args.database, hostHeld: false, gateActive: args.gateActive });
+  const first = await planVerifyPlacement({ kind, projectId: args.projectId, database: args.database, hostHeld: false, gateActive: args.gateActive, workersRead: args.workersRead });
   if (first.target !== "host") return first; // `worker` / `hold` do not depend on host load
   // `prefer-worker` answers "host" while the host has room: ask again with the real load.
   const saturated = await hostTooTightForProbe().catch(() => null);
-  return saturated === null ? first : planVerifyPlacement({ kind, projectId: args.projectId, database: args.database, hostHeld: true, gateActive: args.gateActive });
+  return saturated === null ? first : planVerifyPlacement({ kind, projectId: args.projectId, database: args.database, hostHeld: true, gateActive: args.gateActive, workersRead: args.workersRead });
 }
 
 const hostRefused = (name: string): (() => Promise<SetupScriptResult>) => async () => ({
