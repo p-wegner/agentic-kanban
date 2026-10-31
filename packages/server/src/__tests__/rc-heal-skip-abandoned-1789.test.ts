@@ -7,7 +7,7 @@ import type { Database } from "../db/index.js";
 
 describe("rcHealSkipReason (#1789)", () => {
   it("skips a heal for a candidate rc-state marks abandoned", async () => {
-    const stable = mkdtempSync(join(tmpdir(), "rc-skip-"));
+    const stable = mkdtempSync(join(tmpdir(), "ak-rc-skip-"));
     mkdirSync(join(stable, ".kanban"));
     writeFileSync(join(stable, ".kanban", "rc-state.json"), JSON.stringify({
       version: 1,
