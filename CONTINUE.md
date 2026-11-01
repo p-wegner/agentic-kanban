@@ -7,6 +7,23 @@ the board, `pnpm cli -- backlog export`) for candidate future work.
 promote): read `docs/agent-guide/operator-reference.md` first.** Full console:
 `pnpm cli -- status --watch`. This line is standing; keep it when passes are archived.
 
+## 2026-10-31: stable-20261031-2 live, board stopped, master pushed
+
+- **Stable = `stable-20261031-2` = 0d1ed9f3f** (rc/20261031-2 full sweep green after one flaky
+  re-run, smoke passed; merge-back into master 583123690, master probe passed). The earlier
+  `stable-20261031` (13fa687e7) went out by `pnpm promote --recover` because the reprobe route
+  hung; its owed sweep then ran green on desktop-stable.
+- **Landed:** #1786 (fix-direct ResolvedTarget rename), #1787 (rc verdict mirrored, skip reason
+  logged), #1789 (one shared worker read per reprobe decision; no heal for an abandoned rc),
+  #1790 (rc-heal test temp dir `ak-` prefix). #1788 (heal for the abandoned rc/20261030) Cancelled.
+- **Teardown (2026-11-01 ~09:30):** the stable board on 3001 and the `status --watch` console are
+  **stopped**; no vitest or worktree servers were running. Master is **pushed to GitHub**
+  (range scanned clean against the confidential-terms list). Restart: see `docs/two-boards.md`.
+- **Waiting on Peter:** #1783 and #1782 recommended to start next (clear `noAutoStart`); #1784
+  needs a call on operator identity (UI nonce vs CLI signing); #1781 holds while ao-pf38 is
+  offline; #1785 after the others; #1674 blocked in Backlog.
+- **Workers:** ao-pf38 offline since 2026-10-31 ~00:52; wsl-stable still lacks an anth login.
+
 ## 2026-10-25: scaffolded hooks load in `"type": "module"` projects
 
 Done: `ensureHookScaffold` and `ensureVerifyGateRunner` write `.claude/hooks/package.json` with
@@ -67,37 +84,13 @@ installed dependencies, so the shepherd resolves conflicts without running suite
   Round 6 of the Jira loop test (lab `jira-kd-lab5`, open conflict KD-56) is next now that #1675 is
   live; then switch off lab5's 10-minute sync schedule.
 
-## 2026-10-18 day: six trains landed, stable-20261018-3 live, master pushed
-
-- **Stable = `stable-20261018-3` = 46ad62813** (promoted 21:30Z; fresh full rc sweep of
-  rc/20261018-3 green, smoke passed; rollback target `stable-20261018-2` = ecb430e51). Promote ran
-  in herdr pane w1:p62; console (`status --watch -i 60`) in w1:p5Z. Master and the tag are
-  **pushed to GitHub** (scrubbed against the confidential-terms list and for local paths first).
-- **Board is empty:** only #1618 (`status --watch` dies on one failed refresh) is open, In Review.
-- **Trains today**, most landed by the operator in a sibling worktree (check:arch, typecheck,
-  file-scoped suites + guards), subject "Merge train <label> (operator-landed)": 2026-10-18-02
-  (ebf5db42e, #1569 #1583 #1589-#1591), 04 (b4f770200, #1572 #1597 #1598), manual 08 (772b0b2f0,
-  #1599-#1601), board train 08 (48bdfb0d7, #1602-#1604 #1608), 09b (65930fa21, #1605-#1607
-  #1609-#1616), 10 (46ad62813, #1617). Recipe: `docs/agent-guide/merge-trains.md`.
-- **Why trains stalled:** the shepherd had 1 turn and a 20 min budget that also covered its
-  re-gates, and never ran checks before handing back; the gate stops at arch, so tests never ran
-  for it. Now `merge_train_agent_fix_max_turns`=3, `merge_train_agent_fix_timeout_ms`=5400000 on
-  agentic-kanban, plus #1602. Operator actions that broke trains (commits/push during a gate,
-  promote mid-fix, cancel losing the fix, 5 s console polling) are #1601 #1607-#1609 #1614.
-- **Decisions:** `sprint` has no scheduled master sweep; only promote runs the full suite, gates
-  use impact-reduced suites (decision 017, amendment 2026-10-18). The 1000-line ceiling is
-  replaced by the **code-health posture** (#1613, decision 021): soft caps are recorded, hard caps
-  block at pre-commit/implement-exit, a hard-cap breach is fixed to below the SOFT cap, and
-  accumulated soft breaches file one cleanup ticket.
-- The cleanup ticket is an ordinary ticket (Peter, 2026-10-19): default placement, the board pulls it in like any other.
-- **ao-pf38 still needs its reboot** (shown `draining` in the console).
-
 ## Archive
 
 Passes older than today have been moved **verbatim, newest first** into
 [`docs/archive/CONTINUE-archive.md`](docs/archive/CONTINUE-archive.md). Nothing is re-verified or
 edited on the way in, so each pass records what that session believed at the time. The archive
 holds:
+- **2026-10-18 day (moved 2026-11-01):** six trains landed, stable-20261018-3, master pushed.
 - **2026-10-18 night (moved 2026-10-23):** trains 05, 07, 08 by hand, stable-20261018, the
   rc/20261018 heal (#1588).
 - **2026-10-17 evening + morning (moved 2026-10-18 day):** train 04 by hand, stable-20261017-3,

@@ -11,6 +11,33 @@ First archive pass: 2026-08-27, cutting at the 2026-08-24 boundary (`CONTINUE.md
 
 ---
 
+## 2026-10-18 day: six trains landed, stable-20261018-3 live, master pushed
+
+- **Stable = `stable-20261018-3` = 46ad62813** (promoted 21:30Z; fresh full rc sweep of
+  rc/20261018-3 green, smoke passed; rollback target `stable-20261018-2` = ecb430e51). Promote ran
+  in herdr pane w1:p62; console (`status --watch -i 60`) in w1:p5Z. Master and the tag are
+  **pushed to GitHub** (scrubbed against the confidential-terms list and for local paths first).
+- **Board is empty:** only #1618 (`status --watch` dies on one failed refresh) is open, In Review.
+- **Trains today**, most landed by the operator in a sibling worktree (check:arch, typecheck,
+  file-scoped suites + guards), subject "Merge train <label> (operator-landed)": 2026-10-18-02
+  (ebf5db42e, #1569 #1583 #1589-#1591), 04 (b4f770200, #1572 #1597 #1598), manual 08 (772b0b2f0,
+  #1599-#1601), board train 08 (48bdfb0d7, #1602-#1604 #1608), 09b (65930fa21, #1605-#1607
+  #1609-#1616), 10 (46ad62813, #1617). Recipe: `docs/agent-guide/merge-trains.md`.
+- **Why trains stalled:** the shepherd had 1 turn and a 20 min budget that also covered its
+  re-gates, and never ran checks before handing back; the gate stops at arch, so tests never ran
+  for it. Now `merge_train_agent_fix_max_turns`=3, `merge_train_agent_fix_timeout_ms`=5400000 on
+  agentic-kanban, plus #1602. Operator actions that broke trains (commits/push during a gate,
+  promote mid-fix, cancel losing the fix, 5 s console polling) are #1601 #1607-#1609 #1614.
+- **Decisions:** `sprint` has no scheduled master sweep; only promote runs the full suite, gates
+  use impact-reduced suites (decision 017, amendment 2026-10-18). The 1000-line ceiling is
+  replaced by the **code-health posture** (#1613, decision 021): soft caps are recorded, hard caps
+  block at pre-commit/implement-exit, a hard-cap breach is fixed to below the SOFT cap, and
+  accumulated soft breaches file one cleanup ticket.
+- The cleanup ticket is an ordinary ticket (Peter, 2026-10-19): default placement, the board pulls it in like any other.
+- **ao-pf38 still needs its reboot** (shown `draining` in the console).
+
+---
+
 ## 2026-10-18 night: trains 05, 07, 08 landed by hand, stable-20261018 live
 
 - **Stable = `stable-20261018` = e1a6bbfa9** (promoted 00:08Z; fresh full rc sweep green in 2680 s,
